@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>请输入 PIN - 局域网文件共享</title>
+<link rel="stylesheet" href="/login.css">
+</head>
+<body>
+<div class="login-wrap">
+  <div class="login-card">
+    <div class="login-icon">🔒</div>
+    <h1>需要 PIN 码</h1>
+    <p class="login-sub">请输入访问密码后继续</p>
+
+    <form id="loginForm" autocomplete="off">
+      <input id="pin" class="pin-input" type="password" inputmode="numeric"
+             placeholder="请输入 PIN" autocomplete="off" maxlength="64" required>
+      <div class="login-msg" id="msg"></div>
+      <button class="login-btn" type="submit" id="btnLogin">进入</button>
+    </form>
+
+    <p class="login-tip" id="tip"></p>
+  </div>
+</div>
+<script src="/login.js"></script>
+</body>
+</html>

@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>局域网文件共享</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="app">
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-icon">📡</span>
+      <div>
+        <h1>局域网文件共享</h1>
+        <p class="brand-sub" id="addrHint">正在获取地址…</p>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <span class="ro-badge" id="roBadge" hidden>只读模式</span>
+      <button class="btn ghost" id="btnCopy">复制访问地址</button>
+      <button class="btn ghost" id="btnRefresh">刷新</button>
+      <button class="btn ghost" id="btnLogout">退出</button>
+    </div>
+  </header>
+
+  <section class="toolbar">
+    <div class="toolbar-left">
+      <button class="btn primary" id="btnUpload">⬆ 上传文件</button>
+      <button class="btn" id="btnFolder">📁 新建文件夹</button>
+      <button class="btn" id="btnText">📝 新建文字</button>
+    </div>
+    <div class="toolbar-right">
+      <input class="search" id="search" type="search" placeholder="搜索当前目录…">
+    </div>
+    <input type="file" id="fileInput" multiple hidden>
+  </section>
+
+  <nav class="crumbs" id="crumbs"></nav>
+
+  <main class="panel">
+    <div class="panel-head">
+      <span id="countLabel">共 0 项</span>
+      <span class="hint">支持把文件直接拖到这里上传</span>
+    </div>
+    <div class="list" id="list"></div>
+    <div class="dropzone" id="dropzone">松开鼠标即可上传到当前目录</div>
+  </main>
+
+  <div class="upload-bar" id="uploadBar" hidden>
+    <div class="upload-info" id="uploadInfo">准备上传…</div>
+    <div class="progress"><div class="progress-fill" id="progressFill"></div></div>
+  </div>
+
+  <footer class="foot">
+    <span id="sharedDir"></span>
+  </footer>
+</div>
+
+<!-- 通用弹窗 -->
+<div class="modal" id="modal">
+  <div class="modal-box">
+    <h3 id="modalTitle">标题</h3>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="modal-actions" id="modalActions"></div>
+  </div>
+</div>
+
+<!-- 编辑器 -->
+<div class="modal" id="editor">
+  <div class="modal-box wide">
+    <h3 id="editorTitle">编辑</h3>
+    <textarea id="editorArea" spellcheck="false"></textarea>
+    <div class="modal-actions">
+      <button class="btn ghost" id="editorCancel">取消</button>
+      <button class="btn primary" id="editorSave">保存</button>
+    </div>
+  </div>
+</div>
+
+<div class="toasts" id="toasts"></div>
+
+<script src="/app.js"></script>
+</body>
+</html>

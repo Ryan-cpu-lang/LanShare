@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LanShare · 局域网文件共享（PIN 保护，零依赖）</title>
+<meta name="description" content="一个 Python 标准库写的局域网文件共享工具：上传下载、在线编辑、文件夹打包、PIN 密码保护。不需要安装任何第三方依赖，双击即用。附带浏览器在线演示。">
+<meta property="og:title" content="LanShare · 局域网文件共享">
+<meta property="og:description" content="零依赖的局域网文件共享工具，PIN 保护、防暴力破解、在线编辑。">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📡</text></svg>">
+<style>
+:root {
+  --bg: #0f1420;
+  --bg-soft: #161d2c;
+  --panel: #1b2333;
+  --line: #2a3448;
+  --text: #e6ecf5;
+  --muted: #8b9bb4;
+  --primary: #3d7eff;
+  --primary-dark: #2f66d6;
+  --green: #2ecc71;
+  --amber: #f0c674;
+  --radius: 14px;
+  --mono: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+a { color: inherit; text-decoration: none; }
+code, pre { font-family: var(--mono); }
+
+/* ---------- 背景光斑 ---------- */
+.glow {
+  position: fixed; pointer-events: none; z-index: 0;
+  border-radius: 50%; filter: blur(90px); opacity: .5;
+}
+.glow-1 { width: 620px; height: 620px; top: -280px; left: -160px;
+  background: radial-gradient(circle, rgba(61,126,255,.42), transparent 68%); }
+.glow-2 { width: 520px; height: 520px; top: 120px; right: -220px;
+  background: radial-gradient(circle, rgba(46,204,113,.22), transparent 70%); }
+
+/* ---------- 顶栏 ---------- */
+.nav {
+  position: sticky; top: 0; z-index: 50;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 20px; padding: 14px 28px;
+  background: rgba(15,20,32,.82);
+  backdrop-filter: blur(14px);
+  border-bottom: 1px solid rgba(42,52,72,.7);
+}
+.nav-brand { display: flex; align-items: center; gap: 10px; font-weight: 650; letter-spacing: .2px; }
+.nav-logo {
+  width: 32px; height: 32px; display: grid; place-items: center;
+  background: linear-gradient(150deg, #24304a, #1b2333);
+  border: 1px solid var(--line); border-radius: 9px; font-size: 16px;
+}
+.nav-links { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.nav-links a {
+  padding: 7px 12px; border-radius: 8px; font-size: 13.5px; color: var(--muted);
+  transition: .16s;
+}
+.nav-links a:hover { color: var(--text); background: rgba(255,255,255,.05); }
+.nav-links a.cta {
+  color: #fff; background: var(--primary); border: 1px solid var(--primary);
+  font-weight: 500; margin-left: 6px;
+}
+.nav-links a.cta:hover { background: var(--primary-dark); }
+
+/* ---------- 通用容器 ---------- */
+.wrap { position: relative; z-index: 1; max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+section { position: relative; z-index: 1; }
+
+/* ---------- Hero ---------- */
+.hero { padding: 78px 0 44px; text-align: center; }
+.badge {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 5px 13px 5px 10px; margin-bottom: 22px;
+  font-size: 12.5px; color: #9fc2ff;
+  background: rgba(61,126,255,.1);
+  border: 1px solid rgba(61,126,255,.28);
+  border-radius: 99px;
+}
+.badge .dot {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--green);
+  box-shadow: 0 0 0 3px rgba(46,204,113,.18);
+}
+.hero h1 {
+  font-size: clamp(32px, 5.4vw, 52px);
+  line-height: 1.16; font-weight: 700; letter-spacing: -.5px;
+  margin-bottom: 18px;
+}
+.hero h1 em {
+  font-style: normal;
+  background: linear-gradient(100deg, #6ea8ff, #58e6a4 88%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.hero .lead {
+  max-width: 620px; margin: 0 auto 32px;
+  color: var(--muted); font-size: 16px;
+}
+.hero .lead b { color: #c8d5e8; font-weight: 600; }
+
+.hero-actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-bottom: 18px; }
+.btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 12px 24px; border-radius: 10px;
+  font-size: 14.5px; font-weight: 500; cursor: pointer;
+  border: 1px solid var(--line); background: var(--bg-soft); color: var(--text);
+  transition: .18s; font-family: inherit;
+}
+.btn:hover { border-color: #3f4f6d; background: #1e2739; transform: translateY(-1px); }
+.btn.primary {
+  background: linear-gradient(160deg, #4a88ff, #3d7eff);
+  border-color: #4a88ff; color: #fff;
+  box-shadow: 0 10px 26px -10px rgba(61,126,255,.85);
+}
+.btn.primary:hover { background: linear-gradient(160deg, #3d7eff, #2f66d6); }
+.btn .arrow { transition: transform .18s; }
+.btn:hover .arrow { transform: translateX(3px); }
+
+.hero-meta {
+  display: flex; gap: 22px; justify-content: center; flex-wrap: wrap;
+  color: #7386a3; font-size: 12.5px; margin-top: 8px;
+}
+.hero-meta span { display: inline-flex; align-items: center; gap: 6px; }
+
+/* ---------- 内嵌演示窗口 ---------- */
+.demo-shell {
+  margin: 52px auto 0; max-width: 1000px;
+  border: 1px solid var(--line); border-radius: 16px;
+  background: var(--panel);
+  box-shadow: 0 40px 90px -40px rgba(0,0,0,.9), 0 0 0 1px rgba(255,255,255,.02) inset;
+  overflow: hidden;
+}
+.demo-chrome {
+  display: flex; align-items: center; gap: 8px;
+  padding: 11px 14px; background: #131a27;
+  border-bottom: 1px solid var(--line);
+}
+.demo-chrome .lamp { width: 10px; height: 10px; border-radius: 50%; }
+.lamp.r { background: #ff5f57; } .lamp.y { background: #febc2e; } .lamp.g { background: #28c840; }
+.demo-url {
+  flex: 1; margin-left: 8px; padding: 4px 12px;
+  font-family: var(--mono); font-size: 11.5px; color: #7d8fab;
+  background: #0d131e; border: 1px solid #232d40; border-radius: 7px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.demo-chrome .open {
+  font-size: 11.5px; color: #7fb0ff; padding: 3px 9px;
+  border: 1px solid #2a3448; border-radius: 6px; white-space: nowrap;
+  transition: .16s;
+}
+.demo-chrome .open:hover { background: rgba(61,126,255,.12); border-color: #3d7eff; }
+.demo-frame {
+  width: 100%; height: 620px; border: 0; display: block; background: var(--bg);
+}
+@media (max-width: 720px) { .demo-frame { height: 540px; } }
+
+.demo-note {
+  text-align: center; color: #6f819e; font-size: 12.5px;
+  margin-top: 14px;
+}
+.demo-note b { color: #9db8dd; font-weight: 600; }
+
+/* ---------- 章节标题 ---------- */
+.sec { padding: 84px 0 0; }
+.sec-head { text-align: center; margin-bottom: 40px; }
+.sec-kicker {
+  display: block; font-size: 12px; letter-spacing: 2.4px;
+  text-transform: uppercase; color: #5d7396;
+  margin-bottom: 10px; font-weight: 600;
+}
+.sec-head h2 {
+  font-size: clamp(24px, 3.4vw, 33px); font-weight: 650; letter-spacing: -.3px;
+  margin-bottom: 10px;
+}
+.sec-head p { color: var(--muted); max-width: 560px; margin: 0 auto; font-size: 14.5px; }
+
+/* ---------- 功能卡片 ---------- */
+.grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(268px, 1fr));
+  gap: 16px;
+}
+.card {
+  padding: 22px 20px; border-radius: var(--radius);
+  background: linear-gradient(170deg, #1b2333, #171e2c);
+  border: 1px solid var(--line);
+  transition: .2s;
+}
+.card:hover { border-color: #3a4a68; transform: translateY(-2px); }
+.card-icon {
+  width: 38px; height: 38px; display: grid; place-items: center;
+  font-size: 18px; margin-bottom: 14px;
+  background: #131a27; border: 1px solid var(--line); border-radius: 10px;
+}
+.card h3 { font-size: 15px; font-weight: 600; margin-bottom: 7px; }
+.card p { font-size: 13.5px; color: var(--muted); line-height: 1.65; }
+.card p code {
+  font-size: 12px; padding: 1px 5px; border-radius: 4px;
+  background: rgba(61,126,255,.12); color: #9fc2ff;
+}
+
+/* ---------- 快速开始 ---------- */
+.start-grid {
+  display: grid; grid-template-columns: 1.05fr .95fr; gap: 16px; align-items: start;
+}
+@media (max-width: 840px) { .start-grid { grid-template-columns: 1fr; } }
+
+.steps { display: grid; gap: 12px; }
+.step {
+  display: flex; gap: 14px; padding: 16px 18px;
+  background: var(--bg-soft); border: 1px solid var(--line); border-radius: var(--radius);
+}
+.step-n {
+  flex: 0 0 26px; height: 26px; display: grid; place-items: center;
+  font-size: 12px; font-weight: 700; color: #9fc2ff;
+  background: rgba(61,126,255,.12); border: 1px solid rgba(61,126,255,.3);
+  border-radius: 8px;
+}
+.step h4 { font-size: 14px; font-weight: 600; margin-bottom: 3px; }
+.step p { font-size: 13px; color: var(--muted); }
+.step p code { font-size: 12px; color: #a8c6f0; }
+
+.console {
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: #0d131e; overflow: hidden;
+}
+.console-bar {
+  display: flex; align-items: center; gap: 7px;
+  padding: 9px 13px; background: #131a27; border-bottom: 1px solid var(--line);
+  font-size: 11.5px; color: #6b7c96;
+}
+.console-bar .lamp { width: 8px; height: 8px; border-radius: 50%; }
+.console pre {
+  padding: 16px 16px 18px; font-size: 12.5px; line-height: 1.85;
+  color: #b9c8dd; overflow-x: auto;
+}
+.console .c-dim { color: #5b6c85; }
+.console .c-key { color: #7fb0ff; }
+.console .c-val { color: #58e6a4; }
+.console .c-warn { color: var(--amber); }
+
+/* ---------- 安全清单 ---------- */
+.sec-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 10px 26px; }
+.sec-item {
+  display: flex; gap: 11px; padding: 12px 0;
+  border-bottom: 1px solid rgba(42,52,72,.55);
+}
+.sec-item .tick {
+  flex: 0 0 18px; height: 18px; margin-top: 3px;
+  display: grid; place-items: center; border-radius: 50%;
+  font-size: 10px; color: #0f1420; background: var(--green);
+  font-weight: 700;
+}
+.sec-item b { display: block; font-size: 13.8px; font-weight: 600; margin-bottom: 2px; }
+.sec-item span.d { font-size: 12.8px; color: var(--muted); }
+
+.warn-box {
+  margin-top: 26px; padding: 16px 18px; border-radius: var(--radius);
+  background: rgba(240,198,116,.07); border: 1px solid rgba(240,198,116,.28);
+  font-size: 13.3px; color: #d9c9a4;
+}
+.warn-box b { color: var(--amber); }
+
+/* ---------- 底部 ---------- */
+footer {
+  margin-top: 88px; padding: 30px 0 44px;
+  border-top: 1px solid rgba(42,52,72,.7);
+  position: relative; z-index: 1;
+}
+.foot-inner {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; flex-wrap: wrap;
+  font-size: 12.8px; color: #6b7c96;
+}
+.foot-inner a { color: #8fa6c6; }
+.foot-inner a:hover { color: #9fc2ff; }
+.foot-links { display: flex; gap: 18px; flex-wrap: wrap; }
+
+@media (max-width: 620px) {
+  .nav { padding: 12px 16px; }
+  .nav-links a:not(.cta) { display: none; }
+  .wrap { padding: 0 16px; }
+  .hero { padding: 52px 0 30px; }
+  .sec { padding: 60px 0 0; }
+}
+</style>
+</head>
+<body>
+
+<div class="glow glow-1"></div>
+<div class="glow glow-2"></div>
+
+<!-- ================= 顶栏 ================= -->
+<nav class="nav">
+  <a class="nav-brand" href="./">
+    <span class="nav-logo">📡</span>
+    <span>LanShare</span>
+  </a>
+  <div class="nav-links">
+    <a href="#features">功能</a>
+    <a href="#demo">在线演示</a>
+    <a href="#start">快速开始</a>
+    <a href="#security">安全</a>
+    <a class="cta" href="https://github.com/Ryan-cpu-lang/LanShare" target="_blank" rel="noopener">GitHub ↗</a>
+  </div>
+</nav>
+
+<!-- ================= Hero ================= -->
+<section class="hero">
+  <div class="wrap">
+    <span class="badge"><span class="dot"></span><b>开源 · MIT</b> &nbsp;·&nbsp; 纯 Python 标准库，零依赖</span>
+
+    <h1>局域网上传文件<br><em>不用再找数据线</em></h1>
+
+    <p class="lead">
+      在电脑上双击运行，手机、平板、另一台电脑打开浏览器就能互传文件。<br>
+      支持上传下载、在线编辑、整目录打包，外加 <b>PIN 密码保护</b>和<b>防暴力破解</b>。
+    </p>
+
+    <div class="hero-actions">
+      <a class="btn primary" href="#demo">立即试用在线演示 <span class="arrow">→</span></a>
+      <a class="btn" href="https://github.com/Ryan-cpu-lang/LanShare" target="_blank" rel="noopener">查看源码</a>
+    </div>
+
+    <div class="hero-meta">
+      <span>🐍 Python 3.8+</span>
+      <span>📦 无需 pip install</span>
+      <span>💻 Windows / macOS / Linux</span>
+      <span>🔒 会话签名 + 限流</span>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 内嵌演示 ================= -->
+<section id="demo">
+  <div class="wrap">
+    <div class="demo-shell">
+      <div class="demo-chrome">
+        <span class="lamp r"></span><span class="lamp y"></span><span class="lamp g"></span>
+        <span class="demo-url">localhost:8080 &nbsp;/&nbsp; 局域网文件共享</span>
+        <a class="open" href="./demo/" target="_blank" rel="noopener">新窗口打开 ↗</a>
+      </div>
+      <iframe class="demo-frame" src="./demo/" title="LanShare 在线演示" loading="lazy"
+              allow="clipboard-write"></iframe>
+    </div>
+    <p class="demo-note">
+      <b>这是真的能点的演示。</b>
+      新建文件夹、写字、上传、下载、打包 zip、搜索、删除全部真实生效 ——
+      数据只存在你自己的浏览器里（localStorage），刷新不丢，也不会传到任何服务器。
+    </p>
+  </div>
+</section>
+
+<!-- ================= 功能 ================= -->
+<section class="sec" id="features">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="sec-kicker">Features</span>
+      <h2>该有的都有，不该有的一个没有</h2>
+      <p>没有账号体系、没有云、没有注册登录。开一个进程，局域网内谁都能用。</p>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <div class="card-icon">⬆️</div>
+        <h3>拖拽上传</h3>
+        <p>点按钮多选，或直接把文件拖进页面。带实时进度条，大文件也不卡界面。</p>
+      </div>
+      <div class="card">
+        <div class="card-icon">📦</div>
+        <h3>整目录打包下载</h3>
+        <p>文件夹一键压成 zip，支持多级目录与中文名，浏览器原生下载。</p>
+      </div>
+      <div class="card">
+        <div class="card-icon">📝</div>
+        <h3>在线写 / 改文字</h3>
+        <p>直接新建 txt、md，改完 <code>Ctrl+S</code> 保存。临时记点东西很方便。</p>
+      </div>
+      <div class="card">
+        <div class="card-icon">🖼️</div>
+        <h3>图片视频直接预览</h3>
+        <p>图片、PDF、音频、视频走 <code>/shared/</code> 路径，浏览器里点开就看。</p>
+      </div>
+      <div class="card">
+        <div class="card-icon">🔍</div>
+        <h3>当前目录搜索</h3>
+        <p>顶部搜索框实时过滤，文件多了也不至于翻半天。</p>
+      </div>
+      <div class="card">
+        <div class="card-icon">⚙️</div>
+        <h3>一个 JSON 管全部</h3>
+        <p>PIN、会话时长、锁定策略、只读模式、HTTPS 都在 <code>config.json</code> 里改。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 快速开始 ================= -->
+<section class="sec" id="start">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="sec-kicker">Quick Start</span>
+      <h2>三步，两分钟</h2>
+      <p>只要机器上有 Python 3.8 以上，就不需要装任何东西。</p>
+    </div>
+
+    <div class="start-grid">
+      <div class="steps">
+        <div class="step">
+          <span class="step-n">1</span>
+          <div>
+            <h4>拿到代码</h4>
+            <p><code>git clone https://github.com/Ryan-cpu-lang/LanShare.git</code><br>
+               或者直接下 ZIP 解压。</p>
+          </div>
+        </div>
+        <div class="step">
+          <span class="step-n">2</span>
+          <div>
+            <h4>双击启动</h4>
+            <p>Windows 双击 <code>启动共享.bat</code>；其他系统跑 <code>python server.py</code>。</p>
+          </div>
+        </div>
+        <div class="step">
+          <span class="step-n">3</span>
+          <div>
+            <h4>手机打开控制台给的地址</h4>
+            <p>输入 6 位 PIN 就进去了。文件都在 <code>shared/</code> 目录里，直接拷进去也立刻显示。</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="console">
+        <div class="console-bar">
+          <span class="lamp r"></span><span class="lamp y"></span><span class="lamp g"></span>
+          <span style="margin-left:6px">启动共享.bat</span>
+        </div>
+        <pre><span class="c-dim">D:\LanShare&gt;</span> python server.py
+
+  <span class="c-key">访问 PIN :</span> <span class="c-val">482913</span>
+  <span class="c-key">本机访问 :</span> <span class="c-val">http://localhost:8080</span>
+  <span class="c-key">局域网   :</span> <span class="c-val">http://192.168.1.93:8080</span>
+
+<span class="c-dim">提示：手机连同一个 WiFi，浏览器打开上面
+       局域网地址，输入 PIN 即可。</span>
+
+<span class="c-dim">[10:32:18]</span> 共享目录: <span class="c-dim">D:\LanShare\shared</span>
+<span class="c-dim">[10:32:18]</span> 只读模式: <span class="c-warn">关闭</span>
+<span class="c-dim">[10:32:18]</span> 已就绪，等待连接…</pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 安全 ================= -->
+<section class="sec" id="security">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="sec-kicker">Security</span>
+      <h2>PIN 不是一个输入框，是一整套约束</h2>
+      <p>局域网虽然小，但同一个 WiFi 下的人并不都是善意的。</p>
+    </div>
+
+    <div class="sec-list">
+      <div class="sec-item">
+        <span class="tick">✓</span>
+        <div><b>签名会话，伪造无效</b>
+          <span class="d">登录凭证是 HMAC-SHA256 签名的 HttpOnly Cookie，改一个字节就作废。</span></div>
+      </div>
+      <div class="sec-item">
+        <span class="tick">✓</span>
+        <div><b>防暴力破解</b>
+          <span class="d">同一 IP 连错 5 次锁 5 分钟，次数与时长都可调。</span></div>
+      </div>
+      <div class="sec-item">
+        <span class="tick">✓</span>
+        <div><b>原子比较，不泄时序</b>
+          <span class="d">PIN 校验用 <code>hmac.compare_digest</code>，猜不出前几位对不对。</span></div>
+      </div>
+      <div class="sec-item">
+        <span class="tick">✓</span>
+        <div><b>路径锁死在 shared/ 里</b>
+          <span class="d">任何 <code>../</code> 越界、绝对路径、符号链接都被拒绝。</span></div>
+      </div>
+      <div class="sec-item">
+        <span class="tick">✓</span>
+        <div><b>上传内容不当 HTML 解析</b>
+          <span class="d">HTML 走沙箱响应头，没法在你的域下跑脚本偷 Cookie。</span></div>
+      </div>
+      <div class="sec-item">
+        <span class="tick">✓</span>
+        <div><b>只读模式</b>
+          <span class="d">打开后只能看和下载，谁都不能改、不能删。适合把资料发给一群人。</span></div>
+      </div>
+    </div>
+
+    <div class="warn-box">
+      <b>⚠️ 想直接放到公网？</b>
+      先读 README 那一节。HTTP 是明文的、6 位数字 PIN 在公网扛不住撞库，
+      至少套一层 HTTPS（Cloudflare Tunnel 最省事）并把 PIN 换成随机长串。
+      默认配置是给「自家 WiFi」用的，不是给互联网用的。
+    </div>
+  </div>
+</section>
+
+<!-- ================= 底部 ================= -->
+<footer>
+  <div class="wrap foot-inner">
+    <div>© <span id="year">2026</span> LanShare · MIT License · 用 Python 标准库写的</div>
+    <div class="foot-links">
+      <a href="./demo/">在线演示</a>
+      <a href="https://github.com/Ryan-cpu-lang/LanShare" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/Ryan-cpu-lang/LanShare#readme" target="_blank" rel="noopener">文档</a>
+      <a href="https://github.com/Ryan-cpu-lang/LanShare/issues" target="_blank" rel="noopener">反馈</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+  document.getElementById('year').textContent = new Date().getFullYear();
+</script>
+</body>
+</html>

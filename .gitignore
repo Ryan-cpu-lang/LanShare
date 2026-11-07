@@ -1,0 +1,26 @@
+# 依赖与本地配置（含 PIN，不要提交到仓库）
+config.json
+.session_secret
+cert.pem
+key.pem
+
+# 共享出去的私人文件
+shared/*
+!shared/使用说明.txt
+
+# 日志与系统文件
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+__pycache__/
+*.pyc
+node_modules/
+
+# 本地测试产物
+.playwright-cli/
+site/demo-shot.png
+site/*.png
+.workbuddy/

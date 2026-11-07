@@ -1,0 +1,93 @@
+:root {
+  --bg: #0f1420;
+  --panel: #1b2333;
+  --line: #2a3448;
+  --text: #e6ecf5;
+  --muted: #8b9bb4;
+  --primary: #3d7eff;
+  --primary-dark: #2f66d6;
+  --red: #ff5c5c;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: -apple-system, "Segoe UI", "Microsoft YaHei", Roboto, sans-serif;
+  background: radial-gradient(900px 500px at 50% -10%, #1c2a45 0%, var(--bg) 60%);
+  color: var(--text);
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+
+.login-wrap { width: 100%; max-width: 360px; }
+
+.login-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 32px 26px 26px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, .5);
+  text-align: center;
+}
+
+.login-icon {
+  width: 54px; height: 54px; margin: 0 auto 16px;
+  display: grid; place-items: center;
+  background: #131a27; border: 1px solid var(--line);
+  border-radius: 14px; font-size: 26px;
+}
+
+.login-card h1 { font-size: 19px; font-weight: 600; }
+.login-sub { color: var(--muted); font-size: 13px; margin: 6px 0 22px; }
+
+.pin-input {
+  width: 100%;
+  padding: 13px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: #131a27;
+  color: var(--text);
+  font-size: 18px;
+  letter-spacing: 4px;
+  text-align: center;
+  font-family: Consolas, monospace;
+  outline: none;
+  transition: .15s;
+}
+.pin-input:focus { border-color: var(--primary); }
+.pin-input::placeholder { letter-spacing: 1px; font-size: 13px; color: #5b6b86; }
+
+.login-msg {
+  min-height: 18px;
+  font-size: 12px;
+  color: var(--red);
+  margin: 10px 0 4px;
+  line-height: 1.4;
+}
+.login-msg.ok { color: #2ecc71; }
+
+.login-btn {
+  width: 100%;
+  padding: 12px;
+  border: none;
+  border-radius: 10px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  transition: .15s;
+  margin-top: 4px;
+}
+.login-btn:hover { background: var(--primary-dark); }
+.login-btn:disabled { opacity: .55; cursor: not-allowed; }
+
+.login-tip {
+  color: #5b6b86;
+  font-size: 11px;
+  line-height: 1.6;
+  margin-top: 18px;
+}
