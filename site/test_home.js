@@ -74,8 +74,12 @@ function ok(cond, name, extra) {
   ok((await gh.count()) >= 2, 'GitHub 链接数量', String(await gh.count()));
 
   // ---------- 外部链接指向 ----------
-  const ext = await page.locator('.foot-links a').count();
-  ok(ext === 4, '页脚链接 4 个', String(ext));
+  // 页脚会随功能增加而变多（在线演示 / 公网快传 / GitHub / 文档 / 许可证），
+  // 不写死数量，只要关键入口都在就行。
+  const footLinks = await page.locator('.foot-links a').evaluateAll(
+    (as) => as.map((a) => a.textContent.trim()));
+  ok(footLinks.length >= 4, '页脚链接 >= 4 个', String(footLinks.length) + ' → ' + footLinks.join('/'));
+  ok(footLinks.some((t) => t.includes('公网快传')), '页脚有「公网快传」入口', footLinks.join('/'));
 
   // ---------- 响应式 ----------
   await page.setViewportSize({ width: 390, height: 844 });

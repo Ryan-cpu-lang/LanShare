@@ -260,6 +260,69 @@ cloud-transfer/
 
 ---
 
+## 用手机访问（iPhone / 安卓）
+
+**能连。** 手机和电脑连同一个 WiFi 就行，不用装 App、不用连数据线。
+
+### 三步
+
+1. 电脑上启动 `server.py`，看控制台打出来的那行：
+
+   ```
+   局域网   : http://192.168.2.7:8080
+   ```
+
+2. 手机连**同一个 WiFi**（2.4G / 5G 无所谓，同一个路由器就行）。
+3. 手机浏览器地址栏敲这个地址，输 PIN 登录。
+
+地址里的 IP 每台电脑、每次换网络都可能不同，**别照抄上面的 192.168.2.7**，以自己控制台输出的为准。
+登录后页面右上角有个「复制地址」按钮，点一下就能把当前地址复制走（iPhone 上见下面第 2 条）。
+
+### 手机端做了哪些适配
+
+| 问题 | 处理 |
+| --- | --- |
+| iOS 聚焦输入框会自动放大页面，而且不缩回 | 触屏设备上所有输入框字号强制 ≥ 16px |
+| 手指点小按钮容易点错 | 触屏下按钮内边距加大（主按钮 43px、列表按钮 39px、文件行 123px 高） |
+| iPhone 拖动文件是无效操作 | 触屏下隐藏「拖到这里上传」的提示 |
+| 拍照默认 HEIC、录像是 MOV | 补了图标和预览支持，Safari 能直接看，Windows 上的 Chrome 会走下载 |
+| 安卓/iPad 横屏宽度超过 640px 但仍是触屏 | 用 `pointer: coarse` 判断，不靠屏幕宽度 |
+
+### 三个「连不上」的常见原因
+
+**1. 防火墙 / 网络类型**
+
+WiFi 被 Windows 认成「公用网络」时，防火墙默认会拦。`放行防火墙.bat` 只对「专用/域」网络放行，
+所以要么把 WiFi 改成专用（设置 → 网络和 Internet → WiFi → 属性 → 网络配置文件选「专用」），
+要么直接关掉防火墙试一下。查当前状态：
+
+```powershell
+Get-NetConnectionProfile          # NetworkCategory 是 Public 就要注意
+Get-NetFirewallProfile | Select Name, Enabled
+```
+
+**2. iPhone 的「私有 Wi-Fi 地址」和代理**
+
+iOS 默认给每个 WiFi 随机 MAC，正常情况下不影响，但如果路由器做了 MAC 白名单就会连不上：
+设置 → 无线局域网 → 点 WiFi 右边的 ⓘ → 关掉「私有无线局域网地址」。
+
+另外**手机上开了代理/VPN 也会连不上局域网 IP**，先在设置里关掉再试。
+
+**3. 「复制地址」没反应**
+
+`navigator.clipboard` 只在 HTTPS 或 localhost 下可用，`http://192.168.x.x` 属于不安全上下文，
+iOS Safari 下这个 API 直接是 `undefined`。所以做了兜底：自动复制失败时会弹一个只读输入框，
+**长按地址全选 → 拷贝**，这是 iOS 上最稳的办法。
+
+### 已知限制
+
+- **iPhone 不能像 U 盘那样直接「存到文件里」**。`<a download>` 在 iOS 上行为不统一，
+  图片/视频建议用「预览」后长按「存储到照片」，其他文件用「下载」再选「存储到文件」。
+- 手机上传大文件时页面别切后台，iOS 会冻结标签页导致上传中断。
+- 手机端没有多选拖拽，只能点「上传文件」一个一个选（`multiple` 支持一次选多个）。
+
+---
+
 ## 常见问题
 
 **其他设备打不开？**
@@ -267,6 +330,7 @@ cloud-transfer/
 - 确认在同一个局域网
 - Windows 防火墙放行：右键 [放行防火墙.bat](放行防火墙.bat) → 以管理员身份运行
 - 有虚拟机网卡时可能打印多个 IP，换一个试试
+- 手机端见 [用手机访问](#用手机访问iphone--安卓)
 
 **忘记 PIN 了？**
 
@@ -358,6 +422,20 @@ python -m http.server 18100 --directory docs
 ```bash
 node site/test_demo.js http://127.0.0.1:18100/demo/
 ```
+
+**iOS Safari 兼容性**（WebKit 内核 + iPhone 13 视口，走真实局域网 IP 才算数）：
+
+```bash
+# 第一次需要装 WebKit 内核
+PLAYWRIGHT_BROWSERS_PATH=D:/playwright-browsers npx playwright-core install webkit
+
+node site/test_ios_safari.js http://192.168.2.7:8080   # 17 项布局/交互
+node site/test_ios_upload.js  http://192.168.2.7:8080  # 7 项上传下载编辑
+```
+
+脚本从 `config.json` 读 PIN（该文件不进仓库），也可以 `SHARE_PIN=xxxxxx` 覆盖。
+**一定要用 `192.168.x.x` 而不是 `127.0.0.1`** —— 前者 `isSecureContext=false`，
+才能测出 `navigator.clipboard` 不可用这类只在真机上出现的问题。
 
 ### 发布到 GitHub Pages
 

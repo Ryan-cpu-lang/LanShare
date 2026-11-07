@@ -75,6 +75,7 @@
     xls: '📊', xlsx: '📊', csv: '📊',
     ppt: '📽', pptx: '📽',
     jpg: '🖼', jpeg: '🖼', png: '🖼', gif: '🖼', webp: '🖼', bmp: '🖼', svg: '🖼',
+    heic: '🖼', heif: '🖼',
     mp3: '🎵', wav: '🎵', flac: '🎵', m4a: '🎵',
     mp4: '🎬', mkv: '🎬', avi: '🎬', mov: '🎬', webm: '🎬',
     zip: '📦', rar: '📦', '7z': '📦', tar: '📦', gz: '📦',
@@ -95,6 +96,10 @@
   // 可在线预览的图片：与 server.py 的 SAFE_INLINE_TYPES 保持一致
   // svg 能内嵌脚本，服务端强制下载，所以这里也不给预览
   const IMAGE_EXT = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'avif']);
+  // iPhone 拍照默认存成 HEIC，Safari 自己能打开，Chrome/Windows 打不开。
+  // 给预览按钮，打开后由浏览器决定能不能显示，不额外拦。
+  const HEIC_EXT = new Set(['heic', 'heif']);
+  const VIDEO_EXT = new Set(['mp4', 'webm', 'ogv', 'ogg', 'mov', 'm4v']);
 
   /* ---------------- 初始化 ---------------- */
   async function init() {
@@ -193,20 +198,50 @@
     const port = (state.info && state.info.port) || location.port;
     const url = ips.length ? 'http://' + ips[0] + ':' + port : location.origin;
     const done = () => toast('已复制：' + url, 'ok');
+
+    /* iOS Safari 在 http（非 HTTPS）下 navigator.clipboard 是 undefined，
+       而 document.execCommand('copy') 需要 textarea 在可视区域内、且处于焦点，
+       否则会静默失败。这里把 textarea 定位成「不可见但仍在视口内」，
+       并把 readOnly 打开避免弹出键盘。 */
     const fallback = () => {
       const ta = document.createElement('textarea');
       ta.value = url;
+      ta.setAttribute('readonly', '');
+      ta.style.cssText =
+        'position:fixed;top:0;left:0;width:1px;height:1px;padding:0;' +
+        'border:0;outline:0;box-shadow:none;background:transparent;opacity:0.01;';
       document.body.appendChild(ta);
+      ta.focus();
       ta.select();
-      try { document.execCommand('copy'); done(); }
-      catch (_) { toast('请手动复制：' + url); }
+      // iOS 需要显式设置选区，只 select() 有时选不中
+      ta.setSelectionRange(0, url.length);
+      let ok = false;
+      try { ok = document.execCommand('copy'); } catch (_) { ok = false; }
       ta.remove();
+      if (ok) return done();
+      // 彻底失败时把地址显示出来，让用户长按手动复制（iOS 上这是最稳的办法）
+      showCopyDialog(url);
     };
+
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(url).then(done).catch(fallback);
     } else {
       fallback();
     }
+  }
+
+  /* 复制失败时的兜底：弹一个可长按选中的输入框 */
+  function showCopyDialog(url) {
+    openModal('手动复制地址',
+      '<p style="color:#8b9bb4;font-size:12px;line-height:1.6;margin-bottom:10px">' +
+        '当前浏览器不允许自动复制，请长按下面的地址全选后复制：</p>' +
+      '<input id="dlgCopyUrl" readonly value="' + escapeHtml(url) + '" ' +
+        'style="font-size:16px;text-align:center">',
+      [{ text: '知道了', kind: 'primary', onClick: closeModal }]);
+    setTimeout(() => {
+      const n = $('#dlgCopyUrl');
+      if (n) { n.focus(); n.select(); }
+    }, 50);
   }
 
   async function logout() {
@@ -295,6 +330,23 @@
     });
   }
 
+  /* Safari（含 iOS）原生支持 HEIC，Chrome / Firefox / Windows 基本都不支持。
+     只在 Safari 上给 HEIC 预览按钮，避免别的浏览器点了打不开还一脸疑惑。 */
+  function isSafari() {
+    const ua = navigator.userAgent;
+    return /Safari/.test(ua) && !/Chrome|Chromium|Edg|OPR|Android/.test(ua);
+  }
+
+  function canPreview(item) {
+    if (item.isDirectory) return false;
+    const ext = item.ext;
+    if (IMAGE_EXT.has(ext)) return true;
+    if (HEIC_EXT.has(ext)) return isSafari();   // iPhone 拍的照
+    if (VIDEO_EXT.has(ext)) return true;        // iPhone 录的 .mov
+    if (ext === 'pdf' || ext === 'mp3' || ext === 'm4a' || ext === 'wav') return true;
+    return false;
+  }
+
   function actionButtons(item) {
     if (item.isDirectory) {
       return '<button class="btn sm" data-act="download">打包下载</button>' +
@@ -305,7 +357,7 @@
       btn.push('<button class="btn sm" data-act="' + (state.readOnly ? 'previewText' : 'edit') + '">' +
         (state.readOnly ? '查看' : '编辑') + '</button>');
     }
-    if (IMAGE_EXT.has(item.ext) || item.ext === 'pdf' || item.ext === 'mp4' || item.ext === 'mp3') {
+    if (canPreview(item)) {
       btn.push('<button class="btn sm" data-act="preview">预览</button>');
     }
     btn.push('<button class="btn sm" data-act="download">下载</button>');
@@ -330,7 +382,7 @@
 
   /* ---------------- 文件操作 ---------------- */
   function preview(item) {
-    if (IMAGE_EXT.has(item.ext) || item.ext === 'pdf' || item.ext === 'mp4' || item.ext === 'mp3') {
+    if (canPreview(item)) {
       window.open('/shared/' + encodePath(item.path), '_blank');
     } else {
       toast('该类型不支持预览，请下载后查看');

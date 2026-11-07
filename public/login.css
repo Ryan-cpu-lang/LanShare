@@ -91,3 +91,10 @@ body {
   line-height: 1.6;
   margin-top: 18px;
 }
+
+/* 触屏设备：按钮做大一点，手指好点；输入框保持 >= 16px 防 iOS 自动放大 */
+@media (pointer: coarse) {
+  .login-btn { padding: 14px; font-size: 16px; }
+  .pin-input { font-size: 18px; }
+  .login-sub { font-size: 14px; }
+}

@@ -189,3 +189,26 @@ textarea:focus { border-color: var(--primary); }
   .toolbar-right { justify-content: stretch; }
   .search { max-width: none; }
 }
+
+/* 触屏设备（iPhone / iPad / 安卓）：所有输入控件字号必须 >= 16px，
+   否则 iOS Safari 在聚焦时会自动放大整个页面，而且不会自己缩回去。
+   注意 login.html 只加载 login.css，那边 .pin-input 已是 18px，不用管。 */
+@media (pointer: coarse) {
+  .search,
+  .modal-body input,
+  .modal-body textarea,
+  #editorArea,
+  textarea { font-size: 16px; }
+
+  /* 触屏上按钮做大一点，手指点得到。
+     苹果 HIG 建议最小可点区域 44x44pt，这里主按钮做到 44，列表小按钮做到 40。 */
+  .btn { padding: 12px 15px; }
+  .btn.sm { padding: 10px 12px; font-size: 13px; }
+  .item { padding: 14px 16px; }
+  .item-name { padding: 3px 0; }
+}
+
+/* iPhone 上拖动文件是无效操作，别显示「拖到这里」的提示 */
+@media (hover: none) and (pointer: coarse) {
+  .panel-head .hint { display: none; }
+}

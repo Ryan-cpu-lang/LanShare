@@ -199,12 +199,26 @@ _RESERVED_NAMES = ({'CON', 'PRN', 'AUX', 'NUL', 'CONIN$', 'CONOUT$'}
 # html / svg / xml / js 是存储型 XSS 的主要载体，绝不能 inline 同源渲染。
 SAFE_INLINE_TYPES = {
     'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/bmp', 'image/avif',
+    # iPhone 拍照默认 HEIC/HEIF；Safari 能直接显示，其他浏览器打不开也不会有安全问题
+    'image/heic', 'image/heif', 'image/heic-sequence', 'image/heif-sequence',
     'video/mp4', 'video/webm', 'video/ogg',
-    'audio/mpeg', 'audio/ogg', 'audio/wav', 'audio/flac', 'audio/mp4',
+    # iPhone 录屏/录像默认 .mov
+    'video/quicktime', 'video/x-m4v',
+    'audio/mpeg', 'audio/ogg', 'audio/wav', 'audio/x-wav', 'audio/flac',
+    'audio/mp4', 'audio/x-m4a',
     'application/pdf',
 }
 
 _RANGE_UNSATISFIABLE = object()
+
+# 不同系统自带的 mime 表差异很大，Linux 上常认不出 HEIC / m4a。
+# 显式注册一遍，保证 iPhone 拍的照片、录的音能正确 inline 预览而不会被强制下载。
+for _ext, _type in (
+    ('.heic', 'image/heic'), ('.heif', 'image/heif'),
+    ('.mov', 'video/quicktime'), ('.m4v', 'video/x-m4v'),
+    ('.m4a', 'audio/x-m4a'), ('.opus', 'audio/ogg'),
+):
+    mimetypes.add_type(_type, _ext)
 
 
 def check_filename(name):
@@ -833,6 +847,12 @@ class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
 
 
 def local_ips():
+    """返回本机局域网 IPv4 列表，真实局域网地址排在虚拟网卡前面。
+
+    Radmin VPN / VMware / VirtualBox 这类虚拟网卡也常有 IPv4，
+    如果把它们的地址排第一，用户「复制访问地址」拿到的手机根本连不上。
+    """
+    import ipaddress
     ips = []
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -849,7 +869,26 @@ def local_ips():
                 ips.append(ip)
     except Exception:
         pass
-    return ips
+
+    def rank(ip):
+        try:
+            addr = ipaddress.ip_address(ip)
+        except ValueError:
+            return 9
+        if ip.startswith('192.168.'):
+            return 0                      # 家用路由器最常见
+        if ip.startswith('10.'):
+            return 1                      # 企业 / 校园网
+        if addr.is_private and ip.startswith('172.'):
+            try:
+                second = int(ip.split('.')[1])
+            except (ValueError, IndexError):
+                return 3
+            return 2 if 16 <= second <= 31 else 8   # 172.16-31 是私有段
+        if addr.is_private:
+            return 5                      # 100.64/10 等运营商级 NAT
+        return 6                          # 公网地址
+    return sorted(ips, key=rank)
 
 
 def main():
