@@ -1,4 +1,28 @@
 -- 后端回归自测（v2：含匿名拦截）
+--
+-- 用法：本脚本依赖一张临时表 _regress_v2 收集中间结果（函数内的 RAISE NOTICE
+-- 在云数据库工具里看不到）。因为平台单次只能执行一条语句，所以不能整体跑，
+-- 需要按下面的顺序分段执行，每段都是独立的 DO 块：
+--
+--   0. CREATE TABLE IF NOT EXISTS _regress_v2 (payload jsonb);
+--   1. 本文件开头到「-- [段1]」之间的内容（匿名拦截 + 正常用户 + 各类拒绝）
+--   2. [段2] 非拥有者取件 / 撤销 / 过期
+--   3. [段3] 次数耗尽 / TTL 夹取
+--   4. SELECT jsonb_pretty(payload) FROM _regress_v2;
+--   5. DROP TABLE _regress_v2;
+--
+-- 每次执行前记得先 DELETE FROM _regress_v2;
+--
+-- 已实测通过的期望结果：
+--   anon_usage / anon_create  → not_signed_in
+--   create_ok                 → ok:true，扣 bytes 与 count
+--   bad_path / too_large / bad_name / too_many / daily_bytes → 对应错误码
+--   other_get                 → ok:true, is_owner:false
+--   revoked_get / expired_get → revoked / expired
+--   daily_count               → left:0
+--   TTL 传 0 → 7 天，传 99 → 30 天
+
+-- [段1]
 DO $$
 DECLARE
   u1 text := 'selftest-u1';
@@ -47,6 +71,7 @@ BEGIN
   out := out || jsonb_build_object('daily_bytes', create_transfer('x',many,7));
 
   -- 非拥有者取件 + 计数
+  -- [段2]
   PERFORM set_config('request.jwt.claim.sub', u2, true);
   PERFORM set_config('request.jwt.claims', jsonb_build_object('sub', u2, 'role','authenticated','is_anonymous',false)::text, true);
   out := out || jsonb_build_object('other_get', get_transfer(c1));
@@ -65,6 +90,7 @@ BEGIN
   out := out || jsonb_build_object('expired_get', get_transfer(c1));
 
   -- 次数耗尽
+  -- [段3]
   DELETE FROM transfer_usage WHERE owner_id=u1;
   FOR i IN 1..20 LOOP
     PERFORM create_transfer('l', jsonb_build_array(jsonb_build_object('name','l'||i,'bytes',1,'path','shared/selftest-u1/l'||i)),7);
