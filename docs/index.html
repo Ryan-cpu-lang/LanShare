@@ -175,6 +175,66 @@ section { position: relative; z-index: 1; }
 }
 .demo-note b { color: #9db8dd; font-weight: 600; }
 
+/* ---------- 公网快传 ---------- */
+.relay {
+  margin-top: 56px; padding: 26px 26px 24px;
+  border: 1px solid rgba(88,230,164,.26); border-radius: 16px;
+  background:
+    radial-gradient(120% 140% at 88% -20%, rgba(46,204,113,.16), transparent 62%),
+    linear-gradient(170deg, #1a2531, #161e2c);
+  box-shadow: 0 30px 70px -40px rgba(46,204,113,.5);
+}
+.relay-top {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.relay-tag {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 11px; font-size: 11.5px; font-weight: 600;
+  color: #7bf0b6; background: rgba(46,204,113,.12);
+  border: 1px solid rgba(46,204,113,.32); border-radius: 99px;
+  letter-spacing: .3px;
+}
+.relay h3 { font-size: 20px; font-weight: 650; letter-spacing: -.2px; }
+.relay .relay-sub { color: var(--muted); font-size: 14px; margin-bottom: 20px; max-width: 640px; }
+.relay .relay-sub b { color: #bfe6d3; font-weight: 600; }
+
+.relay-body { display: grid; grid-template-columns: 1fr 300px; gap: 22px; align-items: start; }
+@media (max-width: 800px) { .relay-body { grid-template-columns: 1fr; } }
+
+.relay-flow { display: flex; flex-wrap: wrap; gap: 8px 6px; align-items: center; }
+.relay-flow .node {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 7px 12px; font-size: 12.8px;
+  background: #131a27; border: 1px solid var(--line); border-radius: 9px;
+}
+.relay-flow .node i {
+  font-style: normal; font-size: 11px; font-weight: 700; color: #7bf0b6;
+}
+.relay-flow .arw { color: #4a5a75; font-size: 13px; }
+
+.relay-meta {
+  display: flex; flex-direction: column; gap: 9px;
+  padding: 16px 18px; border-radius: var(--radius);
+  background: rgba(13,19,30,.62); border: 1px solid var(--line);
+}
+.relay-meta .row {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 12.8px; color: var(--muted);
+}
+.relay-meta .row b { color: #cfe0f5; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+.relay-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 20px; }
+.relay-actions .btn.primary.green {
+  background: linear-gradient(160deg, #35d98a, #21b26d);
+  border-color: #35d98a; color: #08210f; font-weight: 650;
+  box-shadow: 0 10px 26px -12px rgba(35,200,120,.9);
+}
+.relay-actions .btn.primary.green:hover { background: linear-gradient(160deg, #2ec97f, #1a9d5f); }
+
+.relay-tip { margin-top: 16px; font-size: 12.4px; color: #7789a6; line-height: 1.75; }
+.relay-tip b { color: #a8bdd9; font-weight: 600; }
+
 /* ---------- 章节标题 ---------- */
 .sec { padding: 84px 0 0; }
 .sec-head { text-align: center; margin-bottom: 40px; }
@@ -313,6 +373,7 @@ footer {
   <div class="nav-links">
     <a href="#features">功能</a>
     <a href="#demo">在线演示</a>
+    <a href="#relay">公网快传</a>
     <a href="#start">快速开始</a>
     <a href="#security">安全</a>
     <a class="cta" href="https://github.com/Ryan-cpu-lang/LanShare" target="_blank" rel="noopener">GitHub ↗</a>
@@ -328,12 +389,13 @@ footer {
 
     <p class="lead">
       在电脑上双击运行，手机、平板、另一台电脑打开浏览器就能互传文件。<br>
-      支持上传下载、在线编辑、整目录打包，外加 <b>PIN 密码保护</b>和<b>防暴力破解</b>。
+      支持上传下载、在线编辑、整目录打包，外加 <b>PIN 密码保护</b>和<b>防暴力破解</b>。<br>
+      <span style="color:#7bf0b6">不在同一个局域网？往下看 <b style="color:#9df3c8">公网快传</b>。</span>
     </p>
 
     <div class="hero-actions">
       <a class="btn primary" href="#demo">立即试用在线演示 <span class="arrow">→</span></a>
-      <a class="btn" href="https://github.com/Ryan-cpu-lang/LanShare" target="_blank" rel="noopener">查看源码</a>
+      <a class="btn" href="#relay">公网传输 <span class="arrow">→</span></a>
     </div>
 
     <div class="hero-meta">
@@ -362,6 +424,55 @@ footer {
       新建文件夹、写字、上传、下载、打包 zip、搜索、删除全部真实生效 ——
       数据只存在你自己的浏览器里（localStorage），刷新不丢，也不会传到任何服务器。
     </p>
+
+    <!-- ---------- 公网快传入口 ---------- -->
+    <div class="relay" id="relay">
+      <div class="relay-top">
+        <span class="relay-tag"><span class="dot" style="width:6px;height:6px;border-radius:50%;background:#35d98a;display:inline-block"></span>公网模式</span>
+        <h3>不在同一个局域网？用公网快传</h3>
+      </div>
+      <p class="relay-sub">
+        上面那套需要两边连同一个 WiFi。如果你和对方隔着城市、隔着网，
+        用这个：<b>上传后生成 6 位取件码</b>，对方打开同一个网址输码就能下。
+        文件到期自动删除，<b>每天有免费额度</b>。
+      </p>
+
+      <div class="relay-body">
+        <div>
+          <div class="relay-flow">
+            <span class="node"><i>A</i> 上传文件</span>
+            <span class="arw">→</span>
+            <span class="node"><i>B</i> 拿到取件码</span>
+            <span class="arw">→</span>
+            <span class="node"><i>C</i> 发给对方</span>
+            <span class="arw">→</span>
+            <span class="node"><i>D</i> 对方输码取件</span>
+          </div>
+
+          <div class="relay-actions">
+            <a class="btn primary green" href="https://lanshare-relay.app.workbuddy.host/?sharecode=DUCZ4LTDLO"
+               target="_blank" rel="noopener">打开公网快传 <span class="arrow">→</span></a>
+            <a class="btn" href="#relay-tip">它能传多大？</a>
+          </div>
+
+          <p class="relay-tip" id="relay-tip">
+            <b>额度：</b>每天 500 MB + 20 次，单文件最大 100 MB，单次最多 20 个文件，次日零点重置。<br>
+            <b>有效期：</b>默认 7 天，到期自动清理，也可以随时手动撤销。<br>
+            <b>注意：</b>收发双方都需要用手机号登录（首次登录自动注册，不用设密码）。
+            这是平台存储的硬性限制，不是我们故意加的门槛。
+          </p>
+        </div>
+
+        <div class="relay-meta">
+          <div class="row"><span>每日流量</span><b>500 MB</b></div>
+          <div class="row"><span>每日次数</span><b>20 次</b></div>
+          <div class="row"><span>单文件上限</span><b>100 MB</b></div>
+          <div class="row"><span>同时最多</span><b>20 个</b></div>
+          <div class="row"><span>默认有效期</span><b>7 天</b></div>
+          <div class="row"><span>费用</span><b style="color:#5ce0a0">免费</b></div>
+        </div>
+      </div>
+    </div>
   </div>
 </section>
 
@@ -509,10 +620,12 @@ footer {
     </div>
 
     <div class="warn-box">
-      <b>⚠️ 想直接放到公网？</b>
+      <b>⚠️ 想直接把这个服务放到公网？</b>
       先读 README 那一节。HTTP 是明文的、6 位数字 PIN 在公网扛不住撞库，
       至少套一层 HTTPS（Cloudflare Tunnel 最省事）并把 PIN 换成随机长串。
-      默认配置是给「自家 WiFi」用的，不是给互联网用的。
+      默认配置是给「自家 WiFi」用的，不是给互联网用的。<br>
+      <span style="color:#9db8dd">如果只是想跨网传个文件，别折腾穿透 —— 直接用上面的
+      <a href="#relay" style="color:#7bf0b6;text-decoration:underline">公网快传</a>。</span>
     </div>
   </div>
 </section>
@@ -523,6 +636,7 @@ footer {
     <div>© <span id="year">2026</span> LanShare · MIT License · 用 Python 标准库写的</div>
     <div class="foot-links">
       <a href="./demo/">在线演示</a>
+      <a href="https://lanshare-relay.app.workbuddy.host/?sharecode=DUCZ4LTDLO" target="_blank" rel="noopener">公网快传</a>
       <a href="https://github.com/Ryan-cpu-lang/LanShare" target="_blank" rel="noopener">GitHub</a>
       <a href="https://github.com/Ryan-cpu-lang/LanShare#readme" target="_blank" rel="noopener">文档</a>
       <a href="https://github.com/Ryan-cpu-lang/LanShare/issues" target="_blank" rel="noopener">反馈</a>

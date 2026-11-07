@@ -24,3 +24,6 @@ node_modules/
 site/demo-shot.png
 site/*.png
 .workbuddy/
+
+# 云端应用发布记录（本地）
+.wbapp_*.genie

@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>公网快传 · 不在同一个局域网也能传</title>
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+
+<!-- ============ 登录 ============ -->
+<section id="viewLogin" class="view view-auth">
+  <div class="auth-card">
+    <div class="brand">
+      <div class="brand-mark">⇄</div>
+      <div>
+        <h1>公网快传</h1>
+        <p class="brand-sub">不在同一个局域网，也能把文件递过去</p>
+      </div>
+    </div>
+
+    <div class="auth-body">
+      <label class="field">
+        <span class="field-label">手机号</span>
+        <input id="phone" type="tel" inputmode="numeric" placeholder="11 位手机号" autocomplete="tel">
+        <em id="phoneErr" class="field-err" hidden>请输入正确的 11 位手机号</em>
+      </label>
+
+      <div class="code-row">
+        <label class="field">
+          <span class="field-label">验证码</span>
+          <input id="code" type="text" inputmode="numeric" placeholder="6 位数字" maxlength="6" autocomplete="one-time-code">
+        </label>
+        <button id="btnSendCode" class="btn btn-ghost btn-send" type="button">获取验证码</button>
+      </div>
+
+      <button id="btnLogin" class="btn btn-primary btn-block" type="button">登录 / 注册</button>
+      <p id="authErr" class="auth-err" hidden></p>
+
+      <div class="divider"><span>或</span></div>
+      <button id="btnWechat" class="btn btn-wechat btn-block" type="button">微信扫码登录</button>
+      <p class="auth-tip">首次使用会自动注册，不用设密码。<br>取件也需要登录，所以请把取件码发给<strong>同样注册了本站</strong>的人。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 主应用 ============ -->
+<section id="viewApp" class="view" hidden>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand small">
+        <div class="brand-mark">⇄</div>
+        <div><h1>公网快传</h1></div>
+      </div>
+      <nav class="tabs" role="tablist">
+        <button class="tab active" data-tab="send" role="tab">发送</button>
+        <button class="tab" data-tab="receive" role="tab">取件</button>
+        <button class="tab" data-tab="mine" role="tab">我的传输</button>
+      </nav>
+      <div class="topbar-right">
+        <span id="whoami" class="whoami"></span>
+        <button id="btnLogout" class="btn btn-icon" type="button" title="退出登录">退出</button>
+      </div>
+    </div>
+    <!-- 额度条 -->
+    <div class="quota-bar">
+      <div class="quota-inner">
+        <div class="quota-item">
+          <span class="quota-label">今日流量</span>
+          <div class="quota-track"><div id="quotaBytesFill" class="quota-fill"></div></div>
+          <span id="quotaBytesText" class="quota-text">—</span>
+        </div>
+        <div class="quota-item narrow">
+          <span class="quota-label">今日次数</span>
+          <span id="quotaCountText" class="quota-text">—</span>
+        </div>
+        <div id="quotaReset" class="quota-reset"></div>
+      </div>
+    </div>
+  </header>
+
+  <main class="main">
+
+    <!-- ---------- 发送 ---------- -->
+    <div id="paneSend" class="pane">
+      <div id="dropZone" class="drop">
+        <div class="drop-icon">↑</div>
+        <p class="drop-title">把文件拖进来，或点击选择</p>
+        <p class="drop-sub" id="dropHint">单个文件上限 100 MB · 一次最多 20 个</p>
+        <input id="fileInput" type="file" multiple hidden>
+      </div>
+
+      <div id="queue" class="queue" hidden>
+        <div class="queue-head">
+          <span id="queueSummary">已选 0 个文件</span>
+          <button id="btnClearQueue" class="link-btn" type="button">清空</button>
+        </div>
+        <ul id="queueList" class="queue-list"></ul>
+      </div>
+
+      <div class="send-form">
+        <label class="field">
+          <span class="field-label">给对方的留言 <em class="opt">（可选）</em></span>
+          <input id="note" type="text" maxlength="120" placeholder="例如：这是你要的素材，解压密码 1234">
+        </label>
+        <label class="field narrow-field">
+          <span class="field-label">保存天数</span>
+          <select id="ttl">
+            <option value="1">1 天</option>
+            <option value="3">3 天</option>
+            <option value="7" selected>7 天</option>
+            <option value="14">14 天</option>
+            <option value="30">30 天</option>
+          </select>
+        </label>
+      </div>
+
+      <button id="btnSend" class="btn btn-primary btn-block btn-lg" type="button" disabled>
+        生成取件码
+      </button>
+      <p id="sendErr" class="auth-err" hidden></p>
+      <div id="sendProgress" class="progress" hidden>
+        <div class="progress-track"><div id="sendProgressFill" class="progress-fill"></div></div>
+        <p id="sendProgressText" class="progress-text"></p>
+      </div>
+
+      <div id="sendDone" class="done-card" hidden>
+        <p class="done-eyebrow">取件码</p>
+        <div class="done-code-row">
+          <span id="doneCode" class="done-code">------</span>
+          <button id="btnCopyCode" class="btn btn-ghost" type="button">复制</button>
+        </div>
+        <p class="done-hint">把这个码发给对方，对方登录后输入即可下载</p>
+        <div class="done-actions">
+          <button id="btnCopyLink" class="btn btn-ghost" type="button">复制取件链接</button>
+          <button id="btnSendAgain" class="btn btn-ghost" type="button">再传一批</button>
+        </div>
+        <p id="doneExpire" class="done-expire"></p>
+      </div>
+    </div>
+
+    <!-- ---------- 取件 ---------- -->
+    <div id="paneReceive" class="pane" hidden>
+      <div class="receive-box">
+        <p class="receive-title">输入取件码</p>
+        <div class="receive-row">
+          <input id="rcode" class="code-input" type="text" maxlength="6" placeholder="ABC123" autocapitalize="characters" autocomplete="off">
+          <button id="btnFetch" class="btn btn-primary" type="button">取件</button>
+        </div>
+        <p id="receiveErr" class="auth-err" hidden></p>
+      </div>
+
+      <div id="recvResult" class="recv-result" hidden>
+        <div class="recv-head">
+          <div>
+            <h2 id="recvTitle">共 0 个文件</h2>
+            <p id="recvMeta" class="recv-meta"></p>
+            <p id="recvNote" class="recv-note" hidden></p>
+          </div>
+          <button id="btnZipAll" class="btn btn-ghost" type="button">打包下载</button>
+        </div>
+        <ul id="recvList" class="file-list"></ul>
+      </div>
+    </div>
+
+    <!-- ---------- 我的传输 ---------- -->
+    <div id="paneMine" class="pane" hidden>
+      <div class="mine-head">
+        <h2>我发出的传输</h2>
+        <button id="btnRefreshMine" class="btn btn-ghost btn-sm" type="button">刷新</button>
+      </div>
+      <p id="mineErr" class="auth-err" hidden></p>
+      <ul id="mineList" class="mine-list"></ul>
+      <p id="mineEmpty" class="empty" hidden>还没有发过文件</p>
+    </div>
+
+  </main>
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+</section>
+
+<script src="https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js"></script>
+<script src="./config.js"></script>
+<script src="./app.js"></script>
+</body>
+</html>
