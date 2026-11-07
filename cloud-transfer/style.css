@@ -100,6 +100,32 @@ button, input, select { font: inherit; color: inherit; }
 
 .auth-body { padding: 4px 26px 26px; }
 
+/* 登录方式切换（邮箱 / 手机号） */
+.auth-switch {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  margin-bottom: 18px;
+  background: #101828;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+}
+
+.auth-switch-btn {
+  flex: 1;
+  padding: 8px 10px;
+  background: none;
+  border: 0;
+  border-radius: 7px;
+  color: var(--text-faint);
+  font-size: 13.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color .16s, background .16s;
+}
+.auth-switch-btn:hover { color: var(--text-dim); }
+.auth-switch-btn.active { color: var(--text); background: var(--panel-2); }
+
 .field { display: block; margin-bottom: 14px; }
 
 .field-label {

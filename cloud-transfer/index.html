@@ -20,11 +20,28 @@
     </div>
 
     <div class="auth-body">
-      <label class="field">
-        <span class="field-label">手机号</span>
-        <input id="phone" type="tel" inputmode="numeric" placeholder="11 位手机号" autocomplete="tel">
-        <em id="phoneErr" class="field-err" hidden>请输入正确的 11 位手机号</em>
-      </label>
+      <div class="auth-switch" role="tablist">
+        <button class="auth-switch-btn active" type="button" data-method="email" role="tab" aria-selected="true">邮箱</button>
+        <button class="auth-switch-btn" type="button" data-method="phone" role="tab" aria-selected="false">手机号</button>
+      </div>
+
+      <!-- 邮箱 -->
+      <div id="paneEmail">
+        <label class="field">
+          <span class="field-label">邮箱地址</span>
+          <input id="email" type="email" inputmode="email" placeholder="you@example.com" autocomplete="email" spellcheck="false">
+          <em id="emailErr" class="field-err" hidden>请输入正确的邮箱地址</em>
+        </label>
+      </div>
+
+      <!-- 手机号 -->
+      <div id="panePhone" hidden>
+        <label class="field">
+          <span class="field-label">手机号</span>
+          <input id="phone" type="tel" inputmode="numeric" placeholder="11 位手机号" autocomplete="tel">
+          <em id="phoneErr" class="field-err" hidden>请输入正确的 11 位手机号</em>
+        </label>
+      </div>
 
       <div class="code-row">
         <label class="field">
@@ -39,7 +56,7 @@
 
       <div class="divider"><span>或</span></div>
       <button id="btnWechat" class="btn btn-wechat btn-block" type="button">微信扫码登录</button>
-      <p class="auth-tip">首次使用会自动注册，不用设密码。<br>取件也需要登录，所以请把取件码发给<strong>同样注册了本站</strong>的人。</p>
+      <p class="auth-tip">首次使用会自动注册，不用设密码。<br>邮箱或手机号任选一种都行，收不到邮件记得看垃圾箱。<br>取件也需要登录，所以请把取件码发给<strong>同样注册了本站</strong>的人。</p>
     </div>
   </div>
 </section>

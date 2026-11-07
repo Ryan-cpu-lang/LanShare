@@ -102,7 +102,13 @@
     $('viewApp').hidden = false;
     var u = session && session.user;
     var label = (u && (u.name || u.phone || u.email)) || '已登录';
-    if (u && u.phone) label = u.phone.replace(/^(\d{3})\d{4}(\d{4})$/, '$1****$2');
+    if (u && u.phone) {
+      label = u.phone.replace(/^(\d{3})\d{4}(\d{4})$/, '$1****$2');
+    } else if (u && !u.name && u.email) {
+      // 邮箱脱敏：只露前 2 位和域名
+      var at = u.email.indexOf('@');
+      if (at > 2) label = u.email.slice(0, 2) + '***' + u.email.slice(at);
+    }
     $('whoami').textContent = label;
   }
 
@@ -649,26 +655,60 @@
   }
 
   // ---------------- 登录交互 ----------------
-  var pendingOtp = null;
+  var pendingOtp = null;   // {method:'email'|'phone', target, verificationId, isExistingUser}
   var sendTimer = null;
+  var authMethod = 'email'; // 默认走邮箱：不受短信每日限额影响
 
-  function onPhoneInput() {
+  var EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+  var PHONE_RE = /^1\d{10}$/;
+
+  function setAuthMethod(m) {
+    authMethod = m;
+    document.querySelectorAll('.auth-switch-btn').forEach(function (b) {
+      var on = b.getAttribute('data-method') === m;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    $('paneEmail').hidden = m !== 'email';
+    $('panePhone').hidden = m !== 'phone';
+    // 换方式后旧验证码作废，避免拿 A 通道的码去 B 通道提交
+    pendingOtp = null;
+    showErr($('authErr'), '');
+    showErr($('emailErr'), '');
     showErr($('phoneErr'), '');
   }
 
+  function currentTarget() {
+    return authMethod === 'email'
+      ? ($('email').value || '').trim()
+      : ($('phone').value || '').trim();
+  }
+
+  function onPhoneInput() { showErr($('phoneErr'), ''); }
+  function onEmailInput() { showErr($('emailErr'), ''); }
+
   async function sendCode() {
-    var phone = ($('phone').value || '').trim();
-    if (!/^1\d{10}$/.test(phone)) {
-      showErr($('phoneErr'), '请输入正确的 11 位手机号');
+    var target = currentTarget();
+    var isEmail = authMethod === 'email';
+    var errEl = isEmail ? $('emailErr') : $('phoneErr');
+
+    if (isEmail) {
+      if (!EMAIL_RE.test(target)) {
+        showErr(errEl, '请输入正确的邮箱地址');
+        return;
+      }
+    } else if (!PHONE_RE.test(target)) {
+      showErr(errEl, '请输入正确的 11 位手机号');
       return;
     }
-    showErr($('phoneErr'), '');
+    showErr(errEl, '');
+    showErr($('authErr'), '');
 
     var btn = $('btnSendCode');
     btn.disabled = true;
     btn.textContent = '发送中…';
 
-    var sent = await cloud.auth.sendOtp({ phone: phone });
+    var sent = await cloud.auth.sendOtp(isEmail ? { email: target } : { phone: target });
     if (sent.error) {
       btn.disabled = false;
       btn.textContent = '获取验证码';
@@ -677,12 +717,14 @@
     }
 
     pendingOtp = {
-      phone: phone,
+      method: authMethod,
+      target: target,
       verificationId: sent.data.verificationId,
       isExistingUser: sent.data.isExistingUser
     };
 
-    showErr($('authErr'), '验证码已发送，请查看短信', true);
+    showErr($('authErr'),
+      isEmail ? '验证码已发到邮箱，请查收（含垃圾箱）' : '验证码已发送，请查看短信', true);
 
     var left = 60;
     btn.textContent = left + ' 秒后重发';
@@ -700,11 +742,13 @@
   }
 
   async function submitLogin() {
-    var phone = ($('phone').value || '').trim();
+    var target = currentTarget();
     var token = ($('code').value || '').trim();
 
-    if (!pendingOtp || pendingOtp.phone !== phone) {
-      showErr($('authErr'), '请先获取当前手机号的验证码');
+    if (!pendingOtp || pendingOtp.method !== authMethod || pendingOtp.target !== target) {
+      showErr($('authErr'), authMethod === 'email'
+        ? '请先获取当前邮箱的验证码'
+        : '请先获取当前手机号的验证码');
       return;
     }
     if (!/^\d{4,8}$/.test(token)) {
@@ -716,12 +760,15 @@
     btn.disabled = true;
     btn.textContent = '登录中…';
 
-    var done = await cloud.auth.verifyOtp({
-      phone: pendingOtp.phone,
+    var payload = {
       verificationId: pendingOtp.verificationId,
       isExistingUser: pendingOtp.isExistingUser,
       token: token
-    });
+    };
+    if (pendingOtp.method === 'email') payload.email = pendingOtp.target;
+    else payload.phone = pendingOtp.target;
+
+    var done = await cloud.auth.verifyOtp(payload);
 
     btn.disabled = false;
     btn.textContent = '登录 / 注册';
@@ -765,10 +812,21 @@
   var currentCode = '';
 
   function bind() {
+    $('email').addEventListener('input', onEmailInput);
     $('phone').addEventListener('input', onPhoneInput);
+    document.querySelectorAll('.auth-switch-btn').forEach(function (b) {
+      b.addEventListener('click', function () { setAuthMethod(b.getAttribute('data-method')); });
+    });
     $('btnSendCode').addEventListener('click', sendCode);
     $('btnLogin').addEventListener('click', submitLogin);
     $('btnWechat').addEventListener('click', wechatLogin);
+
+    $('email').addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') sendCode();
+    });
+    $('phone').addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') sendCode();
+    });
 
     $('code').addEventListener('keydown', function (e) {
       if (e.key === 'Enter') submitLogin();
