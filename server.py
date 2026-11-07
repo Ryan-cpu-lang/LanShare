@@ -104,7 +104,39 @@ DEFAULT_CONFIG = {
     'key_file': 'key.pem',    # HTTPS 私钥
 }
 
+# 共享目录：首次创建时放一份说明进去。
+# 不然用户双击 exe 后打开页面是一片空白，不知道该干嘛。
+# 只在「目录本来不存在」时写，用户主动删掉后不会再冒出来。
+_README_NAME = '使用说明.txt'
+_SHARED_IS_NEW = not os.path.isdir(SHARED_DIR)
 os.makedirs(SHARED_DIR, exist_ok=True)
+if _SHARED_IS_NEW:
+    try:
+        with open(os.path.join(SHARED_DIR, _README_NAME), 'w', encoding='utf-8') as f:
+            f.write(
+                '欢迎使用局域网文件共享\n'
+                '\n'
+                '这个文件夹就是共享区：\n'
+                '  · 你把文件拖进来，别的设备立刻就能看到\n'
+                '  · 别人上传的文件也会存在这里\n'
+                '  · 删掉这个文件不影响使用，想删就删\n'
+                '\n'
+                '怎么让别人连进来：\n'
+                '  1. 对方和这台电脑连同一个 WiFi\n'
+                '  2. 电脑页面上点「手机扫码」，手机扫一下就直接进（不用输地址、不用输 PIN）\n'
+                '  3. 或者手动打开控制台里显示的「手机访问」地址，再输入那 6 位 PIN\n'
+                '\n'
+                '手机上能做什么：\n'
+                '  上传（一次可选多个）、下载、预览图片和音视频、在线编辑文字、新建文件夹、打包成 zip\n'
+                '\n'
+                '注意：\n'
+                '  · 这个工具只在局域网内可用，关掉黑色窗口 = 停止服务\n'
+                '  · PIN 存在 config.json 里，改完重启就生效\n'
+                '  · 不在同一个 WiFi 的话，用公网快传：'
+                'https://lanshare-relay.app.workbuddy.host/?sharecode=DUCZ4LTDLO\n'
+            )
+    except Exception:
+        pass
 
 # ---------------- 控制台中文输出 ----------------
 # Windows 控制台默认代码页是 936(GBK)。Python 3.6+ 直接写控制台时走 WriteConsoleW，
