@@ -19,11 +19,12 @@
 
 ### 方式一：下载 exe 直接用（推荐，不用装 Python）
 
-1. 到 [Releases](https://github.com/Ryan-cpu-lang/lanshare/releases) 下载 `LanShare.exe`
+1. 到 **[官网](https://ryan-cpu-lang.github.io/LanShare/)** 或 [Releases](https://github.com/Ryan-cpu-lang/lanshare/releases) 下载 `LanShare.exe`
+   （官网首屏那个蓝色按钮直接就是下载，8.7 MB，免安装）
 2. 双击它 —— 浏览器会自动打开页面，控制台窗口里能看到 PIN 和手机访问地址
 3. 手机连**同一个 WiFi**，用相机或微信扫页面上的二维码，直接进，不用输地址也不用输 PIN
 
-> 换电脑用的话，把这一个 exe 拷过去就行，8.6 MB，免安装。
+> 换电脑用的话，把这一个 exe 拷过去就行，8.7 MB，免安装。
 > `shared/` 文件夹和 `config.json` 会在 exe 旁边自动生成——**想换 PIN 就改 config.json，想放文件就丢进 shared/**。
 > 关闭那个黑色窗口 = 停止服务。
 

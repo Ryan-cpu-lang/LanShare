@@ -293,6 +293,11 @@ section { position: relative; z-index: 1; }
 .step h4 { font-size: 14px; font-weight: 600; margin-bottom: 3px; }
 .step p { font-size: 13px; color: var(--muted); }
 .step p code { font-size: 12px; color: #a8c6f0; }
+.step p .dl-link {
+  color: #7fb0ff; font-weight: 600; border-bottom: 1px solid rgba(127,176,255,.35);
+  transition: .16s;
+}
+.step p .dl-link:hover { color: #a8c6f0; border-bottom-color: #a8c6f0; }
 
 .console {
   border: 1px solid var(--line); border-radius: var(--radius);
@@ -394,7 +399,8 @@ footer {
     </p>
 
     <div class="hero-actions">
-      <a class="btn primary" href="#demo">立即试用在线演示 <span class="arrow">→</span></a>
+      <a class="btn primary" href="./LanShare.exe" download>下载 LanShare.exe（8.7 MB 免安装） <span class="arrow">↓</span></a>
+      <a class="btn" href="#demo">在线试用</a>
       <a class="btn" href="#relay">公网传输 <span class="arrow">→</span></a>
     </div>
 
@@ -526,7 +532,7 @@ footer {
     <div class="sec-head">
       <span class="sec-kicker">Quick Start</span>
       <h2>三步，两分钟</h2>
-      <p>只要机器上有 Python 3.8 以上，就不需要装任何东西。</p>
+      <p>不用装 Python，不用记 IP，不用输密码。</p>
     </div>
 
     <div class="start-grid">
@@ -534,23 +540,25 @@ footer {
         <div class="step">
           <span class="step-n">1</span>
           <div>
-            <h4>拿到代码</h4>
-            <p><code>git clone https://github.com/Ryan-cpu-lang/LanShare.git</code><br>
-               或者直接下 ZIP 解压。</p>
+            <h4>下载 LanShare.exe</h4>
+            <p><a class="dl-link" href="./LanShare.exe" download>点这里下载（8.7 MB，免安装）</a><br>
+               放到桌面或任意文件夹都行，双击就能跑。</p>
           </div>
         </div>
         <div class="step">
           <span class="step-n">2</span>
           <div>
-            <h4>双击启动</h4>
-            <p>Windows 双击 <code>启动共享.bat</code>；其他系统跑 <code>python server.py</code>。</p>
+            <h4>双击运行</h4>
+            <p>黑窗口出现，浏览器自动打开页面。同一目录下会自动生成 <code>shared/</code>，
+               传进来的文件都在那儿。</p>
           </div>
         </div>
         <div class="step">
           <span class="step-n">3</span>
           <div>
-            <h4>手机打开控制台给的地址</h4>
-            <p>输入 6 位 PIN 就进去了。文件都在 <code>shared/</code> 目录里，直接拷进去也立刻显示。</p>
+            <h4>手机扫一下</h4>
+            <p>点页面上的「手机扫码」，手机相机对着屏幕扫 —— 直接进首页，
+               <b>不用输 IP，也不用输 PIN</b>。手机上照样能上传、下载、在线编辑。</p>
           </div>
         </div>
       </div>
@@ -558,20 +566,25 @@ footer {
       <div class="console">
         <div class="console-bar">
           <span class="lamp r"></span><span class="lamp y"></span><span class="lamp g"></span>
-          <span style="margin-left:6px">启动共享.bat</span>
+          <span style="margin-left:6px">LanShare.exe</span>
         </div>
-        <pre><span class="c-dim">D:\LanShare&gt;</span> python server.py
+        <pre><span class="c-dim">D:\LanShare&gt;</span> LanShare.exe
 
+<span class="c-dim">========================================================</span>
+  <span class="c-key">局域网文件共享</span>
+<span class="c-dim">========================================================</span>
+  <span class="c-key">共享目录 :</span> <span class="c-val">D:\LanShare\shared</span>
   <span class="c-key">访问 PIN :</span> <span class="c-val">482913</span>
+  <span class="c-key">手机访问 :</span> <span class="c-val">http://192.168.1.93:8080</span>
   <span class="c-key">本机访问 :</span> <span class="c-val">http://localhost:8080</span>
-  <span class="c-key">局域网   :</span> <span class="c-val">http://192.168.1.93:8080</span>
+<span class="c-dim">========================================================</span>
+  <span class="c-dim">手机连同一个 WiFi，扫电脑页面上的二维码即可进入。</span>
+  <span class="c-dim">关闭这个窗口 = 停止服务</span>
+<span class="c-dim">========================================================</span>
 
-<span class="c-dim">提示：手机连同一个 WiFi，浏览器打开上面
-       局域网地址，输入 PIN 即可。</span>
-
-<span class="c-dim">[10:32:18]</span> 共享目录: <span class="c-dim">D:\LanShare\shared</span>
-<span class="c-dim">[10:32:18]</span> 只读模式: <span class="c-warn">关闭</span>
-<span class="c-dim">[10:32:18]</span> 已就绪，等待连接…</pre>
+<span class="c-dim">[10:32:18]</span> "GET /api/qr-ticket HTTP/1.1" <span class="c-val">200</span>
+<span class="c-dim">[10:32:26]</span> "GET /q/xK9mQ2vB7pTz HTTP/1.1" <span class="c-val">302</span>
+<span class="c-dim">[10:32:26]</span> "POST /api/upload HTTP/1.1" <span class="c-val">200</span></pre>
       </div>
     </div>
   </div>
