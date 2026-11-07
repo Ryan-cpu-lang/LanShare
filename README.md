@@ -28,6 +28,15 @@
 2. 双击它 —— 浏览器会自动打开页面，控制台窗口里能看到 PIN 和手机访问地址
 3. 手机连**同一个 WiFi**，用相机或微信扫页面上的二维码，直接进，不用输地址也不用输 PIN
 
+> **下载太慢 / 下到一半断了？** 国内直连 GitHub Pages 实测只有 10～20 KB/s，
+> 8.7 MB 要十几分钟而且常常中断。用下面两个加速源，实测 300～450 KB/s、20 秒左右就能下完：
+>
+> - [加速源 1](https://gh-proxy.com/https://raw.githubusercontent.com/Ryan-cpu-lang/LanShare/main/docs/LanShare.exe)
+> - [加速源 2](https://ghfast.top/https://raw.githubusercontent.com/Ryan-cpu-lang/LanShare/main/docs/LanShare.exe)
+>
+> 两个源的文件与原版**逐字节一致**（MD5 `2aca6930fc32c89c813d5e2064f906cc`）。
+> 它们只是第三方 GitHub 反向代理，会看到你请求的 URL；不放心就挂着慢慢下官方源。
+
 > 换电脑用的话，把这一个 exe 拷过去就行，8.7 MB，免安装。
 > `shared/` 文件夹和 `config.json` 会在 exe 旁边自动生成——**想换 PIN 就改 config.json，想放文件就丢进 shared/**。
 > 关闭那个黑色窗口 = 停止服务。

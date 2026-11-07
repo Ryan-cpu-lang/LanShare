@@ -138,6 +138,13 @@ section { position: relative; z-index: 1; }
   background: rgba(40,120,90,.14); color: #b6d9c5;
   font-size: 13px; line-height: 1.65; text-align: left;
 }
+.dl-alt {
+  max-width: 680px; margin: 0 auto; font-size: 12.5px;
+  color: #7386a3; line-height: 1.7;
+}
+.dl-alt a { color: #8fb4e8; text-decoration: underline; text-underline-offset: 2px; }
+.dl-alt a:hover { color: #b9d4ff; }
+.dl-alt .dl-alt-note { color: #5d6d86; }
 .hero-meta {
   display: flex; gap: 22px; justify-content: center; flex-wrap: wrap;
   color: #7386a3; font-size: 12.5px; margin-top: 8px;
@@ -374,6 +381,7 @@ footer {
 @media (pointer: coarse), (max-width: 620px) {
   .hero-hint { display: block; }
   .hero-actions .btn-dl { display: none; }
+  .dl-alt { display: none; }
   .hero-actions .btn-relay {
     background: linear-gradient(160deg, #3fc98c, #2fae78);
     border-color: #3fc98c; color: #04241a; font-weight: 500;
@@ -424,6 +432,14 @@ footer {
     <p class="hero-hint">
       你现在用的是手机 —— <b>exe 是 Windows 电脑程序，手机上装不了</b>。<br>
       手机要给别的设备发文件，用人人都能开的 <b>公网快传</b>，不需要电脑。
+    </p>
+
+    <p class="dl-alt">
+      下载慢或断了？试试备用源：
+      <a href="https://gh-proxy.com/https://raw.githubusercontent.com/Ryan-cpu-lang/LanShare/main/docs/LanShare.exe" rel="noopener">加速源 1</a>
+      <span>·</span>
+      <a href="https://ghfast.top/https://raw.githubusercontent.com/Ryan-cpu-lang/LanShare/main/docs/LanShare.exe" rel="noopener">加速源 2</a>
+      <span class="dl-alt-note">（国内直连官方源常常只有十几 KB/s，这两个能到 300–450 KB/s）</span>
     </p>
 
     <div class="hero-meta">
