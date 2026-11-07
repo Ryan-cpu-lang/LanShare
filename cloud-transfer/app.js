@@ -71,6 +71,32 @@
     return m;
   }
 
+  /* 平台错误信息是英文的（如 "Your email can receive up to 1 text message per minute."），
+     直接显示给用户看不懂。这里把常见几种翻译成人话，其余原样返回。
+     channel 由调用方传入（'email' / 'phone'），不依赖外部状态。 */
+  function authErrText(err, channel) {
+    var m = (err && (err.message || String(err))) || '';
+    if (!m) return '操作失败，请重试';
+    if (/per minute|too many requests|rate limit/i.test(m)) {
+      return channel === 'email'
+        ? '同一个邮箱每分钟只能收 1 条验证码，请等 1 分钟再试'
+        : '发送太频繁了，请等 1 分钟再试';
+    }
+    if (/PhoneNumberDailyLimit|daily limit/i.test(m)) {
+      return '这个手机号今天的短信条数已用完，换邮箱登录或明天再试';
+    }
+    if (/quota|exceeded/i.test(m) && /email|mail/i.test(m)) {
+      return '邮箱发送额度暂时用完了，换手机号登录或稍后再试';
+    }
+    if (/invalid.*(code|token)|code.*(invalid|expired)|expired/i.test(m)) {
+      return '验证码不正确或已过期，请重新获取';
+    }
+    if (/fetch|network|Failed to fetch|NetworkError/i.test(m)) {
+      return '网络连接失败，请检查网络后重试';
+    }
+    return m;
+  }
+
   // 文件类型图标
   function iconFor(name, mime) {
     var ext = (name.split('.').pop() || '').toLowerCase();
@@ -712,7 +738,7 @@
     if (sent.error) {
       btn.disabled = false;
       btn.textContent = '获取验证码';
-      showErr($('authErr'), sent.error.message || '验证码发送失败');
+      showErr($('authErr'), authErrText(sent.error, authMethod));
       return;
     }
 
@@ -774,7 +800,7 @@
     btn.textContent = '登录 / 注册';
 
     if (done.error) {
-      showErr($('authErr'), done.error.message || '验证码错误或已失效');
+      showErr($('authErr'), authErrText(done.error, pendingOtp ? pendingOtp.method : authMethod));
       return;
     }
 
