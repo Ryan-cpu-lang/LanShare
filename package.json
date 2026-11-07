@@ -1,0 +1,15 @@
+{
+  "name": "lanshare-dev",
+  "private": true,
+  "version": "1.0.0",
+  "description": "局域网文件共享 - 开发期测试依赖（运行时不需要 Node）",
+  "scripts": {
+    "test:demo": "node site/test_demo.js",
+    "test:home": "node site/test_home.js",
+    "test:qr": "node site/test_qr_login.js",
+    "test:ios": "node site/test_ios_safari.js && node site/test_ios_upload.js"
+  },
+  "devDependencies": {
+    "jsqr": "^1.4.0"
+  }
+}

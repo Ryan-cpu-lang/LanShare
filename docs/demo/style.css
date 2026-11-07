@@ -212,3 +212,54 @@ textarea:focus { border-color: var(--primary); }
 @media (hover: none) and (pointer: coarse) {
   .panel-head .hint { display: none; }
 }
+/* ---------------- 手机扫码弹窗 ---------------- */
+.qr-wrap { text-align: center; }
+
+.qr-img {
+  display: inline-flex;
+  padding: 14px;
+  /* 二维码必须白底，深色背景下相机识别率会掉；这是标准做法，不是没适配暗色 */
+  background: #fff;
+  border-radius: 12px;
+  line-height: 0;
+}
+
+.qr-img svg {
+  display: block;
+  /* 逻辑尺寸给 208px，再靠 max-width 在窄屏上等比缩小 */
+  width: 208px;
+  height: 208px;
+  max-width: 62vw;
+  max-height: 62vw;
+}
+
+.qr-tip { font-size: 14px; color: #c3cede; margin: 14px 0 4px; }
+
+.qr-note {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.6;
+  margin: 0 0 12px;
+}
+
+.qr-url {
+  margin: 0;
+  padding: 8px 10px;
+  background: #0f1420;
+  border: 1px solid #2a3448;
+  border-radius: 8px;
+  /* 16px 是给 iOS 用的：13px 那种小字在手机上长按选中很费劲 */
+  font-size: 16px;
+  overflow-x: auto;
+}
+.qr-url code {
+  color: #7fb0ff;
+  font-size: 12.5px;
+  white-space: nowrap;
+  user-select: all;   /* 一次点选整串，方便手动复制 */
+}
+
+/* 手机上不需要「让手机扫码」这个按钮——你已经在手机上了 */
+@media (pointer: coarse) {
+  #btnQr { display: none; }
+}

@@ -145,6 +145,8 @@
       newTextDialog();
     };
     $('#btnCopy').onclick = copyAddress;
+    const qrBtn = $('#btnQr');
+    if (qrBtn) qrBtn.onclick = showQrDialog;
     $('#btnRefresh').onclick = () => load(state.path);
     const logoutBtn = $('#btnLogout');
     if (logoutBtn) logoutBtn.onclick = logout;
@@ -242,6 +244,53 @@
       const n = $('#dlgCopyUrl');
       if (n) { n.focus(); n.select(); }
     }, 50);
+  }
+
+  /* ---------------- 手机扫码 ----------------
+     手机上要敲 http://192.168.x.x:8080 再输 PIN，五步劝退。
+     这里让电脑生成一张带一次性票据的二维码，手机扫一下直接登录。
+
+     票据存在服务端内存里，10 分钟有效、只能用一次。
+     所以二维码截图发给别人也没用（对方不在同一局域网，压根连不上）。 */
+  async function showQrDialog() {
+    // 手机上再弹二维码没意义，直接在按钮层就藏掉
+    let ticket;
+    try {
+      const data = await api('/api/qr-ticket');
+      ticket = data.ticket;
+    } catch (e) {
+      return toast('二维码生成失败：' + e.message, 'err');
+    }
+
+    const ips = (state.info && state.info.lanIps) || [];
+    const port = (state.info && state.info.port) || location.port;
+    // 优先用真实局域网 IP；万一只有回环地址，扫了也连不上，提示换设备
+    const ip = ips[0];
+    if (!ip) {
+      return toast('没检测到局域网地址，请检查网络连接', 'err');
+    }
+    const url = 'http://' + ip + ':' + port + '/q/' + ticket;
+
+    let svg = '';
+    try {
+      const qr = qrcode(0, 'M');   // 0 = 自动选版本，M = 中等纠错（屏幕上有反光也能扫）
+      qr.addData(url);
+      qr.make();
+      // cellSize 6 + margin 3：在手机上看着够大，扫码枪/相机都好对
+      svg = qr.createSvgTag({ cellSize: 6, margin: 3, scalable: true });
+    } catch (e) {
+      return toast('二维码绘制失败', 'err');
+    }
+
+    openModal('手机扫码连接',
+      '<div class="qr-wrap">' +
+        '<div class="qr-img">' + svg + '</div>' +
+        '<p class="qr-tip">用手机相机或微信「扫一扫」对准二维码</p>' +
+        '<p class="qr-note">手机要和电脑连同一个 WiFi。' +
+          '二维码 10 分钟内有效，且只能用一次。</p>' +
+        '<p class="qr-url"><code>' + escapeHtml(url) + '</code></p>' +
+      '</div>',
+      [{ text: '完成', kind: 'primary', onClick: closeModal }]);
   }
 
   async function logout() {

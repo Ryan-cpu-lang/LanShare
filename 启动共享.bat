@@ -1,25 +1,36 @@
 @echo off
 chcp 65001 >nul
-title 局域网文件共享服务器
+title LanShare - LAN File Share
 cd /d "%~dp0"
 
-echo ================================================
-echo          局域网文件共享服务器
-echo ================================================
-echo.
+rem Prefer the packaged exe: no Python needed.
+if exist "LanShare.exe" (
+    start "" "LanShare.exe"
+    exit /b 0
+)
+if exist "dist\LanShare.exe" (
+    start "" "dist\LanShare.exe"
+    exit /b 0
+)
 
-where python >nul 2>&1
-if errorlevel 1 (
-    echo [错误] 没有找到 Python，请先安装 Python 3
-    echo        下载地址: https://www.python.org/downloads/
+rem Fall back to source. Check py launcher first, then python.
+set "PY="
+where py >nul 2>&1 && set "PY=py"
+if not defined PY where python >nul 2>&1 && set "PY=python"
+if not defined PY (
+    echo.
+    echo [ERROR] Python not found, and LanShare.exe is missing too.
+    echo.
+    echo   Option 1: download LanShare.exe from Releases, put it here, double-click it.
+    echo   Option 2: install Python 3 from https://www.python.org/downloads/
+    echo             remember to tick "Add Python to PATH".
+    echo.
     pause
     exit /b 1
 )
 
-echo [1/2] 正在读取本机局域网地址...
+echo Starting... the browser will open in a few seconds.
 echo.
-echo [2/2] 启动服务...
-echo.
-python server.py
+%PY% server.py
 
 pause

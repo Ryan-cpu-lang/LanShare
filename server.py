@@ -20,17 +20,59 @@ import tempfile
 import zipfile
 import mimetypes
 import posixpath
+import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 from urllib.parse import urlparse, unquote, quote, parse_qs
 from datetime import datetime
 
-# ---------------- 配置 ----------------
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-PUBLIC_DIR = os.path.join(BASE_DIR, 'public')
-SHARED_DIR = os.path.join(BASE_DIR, 'shared')
-CONFIG_PATH = os.path.join(BASE_DIR, 'config.json')
-SECRET_PATH = os.path.join(BASE_DIR, '.session_secret')
+# ---------------- 目录 ----------------
+# 打包成 exe（PyInstaller）后，程序内部文件被解到一个临时目录，
+# 而用户看得见的文件（shared/ 里的文件、config.json）必须留在 exe 旁边，
+# 否则用户传的文件会随程序退出一起消失。所以要区分两套目录。
+_FROZEN = bool(getattr(sys, 'frozen', False))
+if _FROZEN:
+    # exe 所在目录：用户放文件、改 PIN 的地方
+    BASE_DIR = os.path.dirname(os.path.abspath(sys.executable))
+    # 解包目录：public/ 这类只读资源
+    RES_DIR = getattr(sys, '_MEIPASS', BASE_DIR)
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    RES_DIR = BASE_DIR
+
+PUBLIC_DIR = os.path.join(RES_DIR, 'public')
+
+
+def _writable(path):
+    """探测目录是否真的能写文件（光看权限位在 Windows 上不准）。"""
+    probe = os.path.join(path, '.lanshare_write_test')
+    try:
+        with open(probe, 'wb') as f:
+            f.write(b'1')
+        os.remove(probe)
+        return True
+    except Exception:
+        return False
+
+
+# 数据目录：默认就是 exe 旁边，用户一眼能看到文件传到哪了。
+# 但要是有人把 exe 扔进 Program Files（需要管理员权限才能写），
+# 在那里写文件会失败，PIN 也会每次启动都重新生成。这种情况退到用户数据目录。
+DATA_DIR = BASE_DIR
+_FALLBACK_DIR = False
+try:
+    os.makedirs(BASE_DIR, exist_ok=True)
+except Exception:
+    pass
+if not _writable(BASE_DIR):
+    DATA_DIR = os.path.join(
+        os.environ.get('LOCALAPPDATA') or os.path.expanduser('~'), 'LanShare')
+    os.makedirs(DATA_DIR, exist_ok=True)
+    _FALLBACK_DIR = True
+
+SHARED_DIR = os.path.join(DATA_DIR, 'shared')
+CONFIG_PATH = os.path.join(DATA_DIR, 'config.json')
+SECRET_PATH = os.path.join(DATA_DIR, '.session_secret')
 PORT = int(os.environ.get('PORT', 8080))
 HOST = '0.0.0.0'
 MAX_UPLOAD = 500 * 1024 * 1024  # 单次请求上限 500MB
@@ -51,12 +93,48 @@ DEFAULT_CONFIG = {
 
 os.makedirs(SHARED_DIR, exist_ok=True)
 
-# 中文控制台输出兜底
+# ---------------- 控制台中文输出 ----------------
+# Windows 控制台默认代码页是 936(GBK)。Python 3.6+ 直接写控制台时走 WriteConsoleW，
+# 本来没问题；但只要输出被重定向（`> log.txt`、被别的程序捕获）就会按代码页编码，中文变问号。
+# 这里把控制台代码页切成 65001(UTF-8)，同时把 stdout/stderr 也设成 utf-8，两边对齐。
+if os.name == 'nt':
+    try:
+        import ctypes
+        ctypes.windll.kernel32.SetConsoleOutputCP(65001)
+        ctypes.windll.kernel32.SetConsoleCP(65001)
+    except Exception:
+        pass
 try:
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 except Exception:
     pass
+
+
+def set_title(title):
+    """设置控制台窗口标题（Windows）。用户开了好几个窗口时能分得清哪个是哪个。"""
+    if os.name != 'nt':
+        return
+    try:
+        import ctypes
+        ctypes.windll.kernel32.SetConsoleTitleW(title)
+    except Exception:
+        pass
+
+
+def fatal(msg):
+    """致命错误：把原因打出来，并等用户看完再关窗。
+
+    双击运行时窗口一关就什么都看不见，小白只会觉得「点了没反应」。
+    """
+    sys.stderr.write(msg)
+    sys.stderr.flush()
+    if _FROZEN and sys.stdin and sys.stdin.isatty():
+        try:
+            input('\n按回车键退出...')
+        except Exception:
+            pass
+    raise SystemExit(1)
 
 
 def load_config():
@@ -74,12 +152,11 @@ def load_config():
                 raise ValueError('config.json 顶层必须是对象')
         except Exception as e:
             # 解析失败时保留原文件，退出而不是悄悄生成新 PIN
-            sys.stderr.write(
+            fatal(
                 '\n[错误] config.json 解析失败，为避免 PIN 被意外覆盖，服务停止启动。\n'
                 f'       原因: {e}\n'
                 f'       文件: {CONFIG_PATH}\n'
-                '       请修正该文件，或删除它让程序重新生成一个 PIN。\n\n')
-            raise SystemExit(1)
+                '       请修正该文件，或删除它让程序重新生成一个 PIN。\n')
 
     env_pin = os.environ.get('SHARE_PIN')
     if env_pin:
@@ -128,6 +205,33 @@ LOCK_SECONDS = int(CFG.get('lock_seconds', 300))
 
 # 登录失败计数： ip -> [时间戳, ...]
 _FAILS = {}
+
+# ---------------- 扫码登录票据 ----------------
+# 电脑上点「手机扫码」时生成一张一次性票据，二维码里带的是 /q/<票据>。
+# 手机扫到后才知道该连哪个地址、也就不用再手输 PIN。
+# 票据只活在内存里，服务重启即失效；一次性，用过就作废。
+QR_TTL = 10 * 60          # 10 分钟有效
+_QR_TICKETS = {}          # ticket -> 过期时间戳
+_QR_LOCK = threading.Lock()
+
+
+def qr_issue():
+    """生成一张扫码票据，顺手清掉过期的。"""
+    now = time.time()
+    with _QR_LOCK:
+        for key in [k for k, exp in _QR_TICKETS.items() if exp < now]:
+            _QR_TICKETS.pop(key, None)
+        ticket = secrets.token_urlsafe(16)
+        _QR_TICKETS[ticket] = now + QR_TTL
+    return ticket
+
+
+def qr_consume(ticket):
+    """核销票据：有效且未被用过返回 True。用过立即作废，防止链接被转发复用。"""
+    now = time.time()
+    with _QR_LOCK:
+        exp = _QR_TICKETS.pop(ticket, None)
+    return exp is not None and exp >= now
 
 
 def _b64e(raw):
@@ -210,6 +314,33 @@ SAFE_INLINE_TYPES = {
 }
 
 _RANGE_UNSATISFIABLE = object()
+
+# 扫码票据过期 / 已被扫过时的提示页。做成内联 HTML，不额外占文件。
+QR_FAIL_HTML = """<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0f1420">
+<title>二维码已失效</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
+       background:#0f1420;color:#e6ecf5;padding:24px;
+       font:16px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+  .box{max-width:420px;width:100%;background:#161d2e;border:1px solid #2a3448;
+       border-radius:16px;padding:28px 24px;text-align:center}
+  .ico{font-size:40px;line-height:1;margin-bottom:14px}
+  h1{font-size:19px;margin:0 0 10px}
+  p{color:#8b9bb4;font-size:14px;margin:0 0 18px}
+  a{display:inline-block;padding:12px 22px;border-radius:10px;
+    background:#3d7eff;color:#fff;text-decoration:none;font-size:15px;font-weight:600}
+  a:active{opacity:.85}
+</style></head>
+<body><div class="box">
+  <div class="ico">⏳</div>
+  <h1>这个二维码已经过期了</h1>
+  <p>二维码只能用一次，10 分钟内有效。<br>请在电脑上重新点「手机扫码」，再用手机扫新的那张。</p>
+  <a href="/">去输入 PIN 登录</a>
+</div></body></html>"""
 
 # 不同系统自带的 mime 表差异很大，Linux 上常认不出 HEIC / m4a。
 # 显式注册一遍，保证 iPhone 拍的照片、录的音能正确 inline 预览而不会被强制下载。
@@ -383,8 +514,11 @@ class Handler(BaseHTTPRequestHandler):
         if self.is_authed():
             return True
         # 允许未登录时访问的路径
+        # /q/<票据> 是扫码入口，必须免登录，否则手机还没登录就进不来
         if path in ('/login.html', '/login.js', '/login.css',
                     '/api/login', '/api/auth-status', '/favicon.ico'):
+            return True
+        if path.startswith('/q/'):
             return True
         if path.startswith('/api/'):
             self._json(401, {'error': '未登录或登录已过期', 'needLogin': True})
@@ -415,8 +549,12 @@ class Handler(BaseHTTPRequestHandler):
         if not self.check_auth(path):
             return
 
+        if path.startswith('/q/'):
+            return self.handle_qr_login(path[len('/q/'):])
         if path == '/api/info':
             return self.api_info()
+        if path == '/api/qr-ticket':
+            return self.api_qr_ticket()
         if path == '/api/auth-status':
             return self.api_auth_status()
         if path in ('/api/files', '/api/list'):
@@ -495,17 +633,7 @@ class Handler(BaseHTTPRequestHandler):
         # compare_digest 不接受非 ASCII str，先编码成 bytes 才支持中文/emoji PIN
         if hmac.compare_digest(pin.encode('utf-8'), PIN.encode('utf-8')):
             _FAILS.pop(ip, None)
-            token = issue_token()
-            cookie = f'{COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SESSION_TTL}'
-            if CFG.get('cookie_secure') or CFG.get('https'):
-                cookie += '; Secure'
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json; charset=utf-8')
-            self.send_header('Content-Length', '0')
-            self.send_header('Set-Cookie', cookie)
-            self.send_header('Cache-Control', 'no-store')
-            self.end_headers()
-            return
+            return self._login_ok()
 
         record_failure(ip)
         left = MAX_ATTEMPTS - len(_FAILS.get(ip, []))
@@ -514,6 +642,38 @@ class Handler(BaseHTTPRequestHandler):
                 'error': f'错误次数过多，已锁定 {LOCK_SECONDS} 秒',
                 'retryAfter': LOCK_SECONDS})
         return self._json(401, {'error': f'PIN 码不正确，还可尝试 {left} 次', 'remaining': left})
+
+    def _login_ok(self, redirect_to=None):
+        """发一张登录 Cookie。PIN 登录和扫码登录共用这一段。"""
+        token = issue_token()
+        cookie = f'{COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SESSION_TTL}'
+        if CFG.get('cookie_secure') or CFG.get('https'):
+            cookie += '; Secure'
+
+        if redirect_to:
+            # 扫码走浏览器跳转，直接 302 到首页
+            self.send_response(302)
+            self.send_header('Location', redirect_to)
+        else:
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json; charset=utf-8')
+        self.send_header('Content-Length', '0')
+        self.send_header('Set-Cookie', cookie)
+        self.send_header('Cache-Control', 'no-store')
+        self.end_headers()
+
+    def handle_qr_login(self, ticket):
+        """手机扫二维码打开 /q/<票据>：核销票据、发 Cookie、跳首页。
+
+        票据是一次性的，用过就废。所以这链接不能反复用、也不能转发给别人。
+        """
+        if not qr_consume(unquote(ticket).strip()):
+            # 过期或已用过：给一个能看懂的页面，而不是干巴巴的 404
+            return self._send(410, QR_FAIL_HTML, 'text/html; charset=utf-8')
+
+        ip = self.client_ip()
+        _FAILS.pop(ip, None)   # 扫码等于证明「人就在电脑旁边」，清掉失败计数
+        return self._login_ok(redirect_to='/')
 
     def api_logout(self):
         self.send_response(200)
@@ -638,6 +798,13 @@ class Handler(BaseHTTPRequestHandler):
             'sharedDir': os.path.basename(SHARED_DIR),
             'lanIps': [] if CFG.get('trust_proxy') else local_ips(),
             'readOnly': READ_ONLY,
+        })
+
+    def api_qr_ticket(self):
+        """给电脑端页面生成一张扫码票据。只有已登录的人才能调，避免变成开放入口。"""
+        self._json(200, {
+            'ticket': qr_issue(),
+            'ttl': QR_TTL,
         })
 
     def api_list(self, query):
@@ -843,7 +1010,11 @@ class Handler(BaseHTTPRequestHandler):
 
 class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
-    allow_reuse_address = True
+    # Windows 的 SO_REUSEADDR 语义和 Unix 不同：它允许多个进程同时绑同一端口
+    # （结果是两个服务抢请求，用户看到「文件一会儿有一会儿没有」这种鬼现象），
+    # 所以这里在 Windows 上必须关掉，让第二次启动干脆地失败。
+    # Unix 上保留，避免刚关就重启时被 TIME_WAIT 卡住。
+    allow_reuse_address = os.name != 'nt'
 
 
 def local_ips():
@@ -892,7 +1063,18 @@ def local_ips():
 
 
 def main():
-    httpd = ThreadingHTTPServer((HOST, PORT), Handler)
+    try:
+        httpd = ThreadingHTTPServer((HOST, PORT), Handler)
+    except OSError as e:
+        # 最常见的一种：上一个窗口没关，又双击了一次
+        if getattr(e, 'errno', None) in (48, 98, 10048) or 'in use' in str(e).lower():
+            fatal(
+                f'\n[错误] 端口 {PORT} 已经被占用了。\n'
+                '       多半是程序已经在运行——找找任务栏 / 桌面上有没有已经打开的黑色窗口，\n'
+                '       有的话直接用它就行，不要重复启动。\n'
+                '       如果确认没开，可能是别的软件占了这个端口，可以改端口启动：\n'
+                f'         在命令提示符里执行：set PORT=8081 && LanShare.exe\n')
+        fatal(f'\n[错误] 无法启动服务：{e}\n')
 
     scheme = 'http'
     if CFG.get('https'):
@@ -906,37 +1088,59 @@ def main():
             httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True)
             scheme = 'https'
         else:
-            sys.stderr.write(
+            fatal(
                 '\n[错误] 配置要求启用 HTTPS，但没找到证书文件：\n'
                 f'       证书: {cert}\n       私钥: {key}\n'
-                '       请把证书放到上述位置，或把 config.json 的 "https" 改为 false。\n\n')
-            raise SystemExit(1)
+                '       请把证书放到上述位置，或把 config.json 的 "https" 改为 false。\n')
 
     ips = [] if CFG.get('trust_proxy') else local_ips()
+    lan_url = f'{scheme}://{ips[0]}:{PORT}' if ips else None
+    local_url = f'{scheme}://localhost:{PORT}'
+
+    # 窗口标题带上地址，任务栏里一眼能认出来
+    set_title(f'局域网文件共享 - {lan_url or local_url}')
+
     print('=' * 56)
-    print('  局域网文件共享服务器')
+    print('  局域网文件共享')
     print('=' * 56)
     print(f'  共享目录 : {SHARED_DIR}')
     print(f'  访问 PIN : {PIN}')
-    print(f'  本机访问 : {scheme}://localhost:{PORT}')
-    for ip in ips:
-        print(f'  局域网   : {scheme}://{ip}:{PORT}')
+    if lan_url:
+        # 手机要连的就是这一行，加粗显示，别让人再从一堆输出里找
+        print(f'  手机访问 : {lan_url}')
+    for ip in ips[1:]:
+        print(f'  备用地址 : {scheme}://{ip}:{PORT}')
+    print(f'  本机访问 : {local_url}')
     if READ_ONLY:
         print('  运行模式 : 只读（只能浏览和下载）')
     print('=' * 56)
-    print('  提示：PIN 保存在 config.json 的 "pin" 字段，可自行修改')
+    if _FALLBACK_DIR:
+        print(f'  程序所在位置不可写，数据改存在：{DATA_DIR}')
+    if lan_url:
+        print('  手机连同一个 WiFi，扫电脑页面上的二维码即可进入，不用输地址。')
+    print('  关闭这个窗口 = 停止服务')
     if scheme == 'http':
-        print('  安全提醒：当前为 HTTP 明文传输，PIN 与文件内容可被截获。')
-        print('            公网部署请启用 HTTPS（见 README）。')
-    else:
-        print('  加密传输：已启用 HTTPS')
+        print('  注意：当前是 HTTP 明文传输，公网部署请启用 HTTPS（见 README）。')
     print('=' * 56)
-    print('  服务已启动，按 Ctrl+C 停止')
-    print('=' * 56)
+    # 输出被重定向到文件/管道时 Python 会改成块缓冲，横幅会卡在缓冲区里不显示，
+    # 用户会以为「点了没反应」。这里强制刷一次。
+    try:
+        sys.stdout.flush()
+    except Exception:
+        pass
+
+    # 自动开浏览器：小白不用自己去地址栏敲 localhost:8080
+    if not os.environ.get('LANSHARE_NO_BROWSER'):
+        try:
+            import webbrowser
+            webbrowser.open(local_url)
+        except Exception:
+            pass
+
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
-        print('\n服务器已停止')
+        print('\n服务已停止')
     finally:
         httpd.server_close()
 

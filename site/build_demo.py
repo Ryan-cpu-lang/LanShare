@@ -82,6 +82,8 @@ def main():
     # 1) 静态资源
     shutil.copy2(os.path.join(PUBLIC, 'style.css'), os.path.join(OUT, 'style.css'))
     shutil.copy2(os.path.join(PUBLIC, 'app.js'), os.path.join(OUT, 'app.js'))
+    # 二维码库：演示页也保留「手机扫码」按钮，不能少这个文件
+    shutil.copy2(os.path.join(PUBLIC, 'qrcode.js'), os.path.join(OUT, 'qrcode.js'))
     shutil.copy2(os.path.join(ASSETS, 'mock-api.js'), os.path.join(OUT, 'mock-api.js'))
 
     # 2) 改写 index.html
@@ -91,6 +93,7 @@ def main():
     html = html.replace('href="/style.css"', 'href="./style.css"')
     html = html.replace('href="/login.css"', 'href="./login.css"')
     html = html.replace('src="/login.js"', 'src="./login.js"')
+    html = html.replace('src="/qrcode.js"', 'src="./qrcode.js"')
 
     # 标题标注演示
     html = html.replace(

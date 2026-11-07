@@ -24,6 +24,12 @@ node_modules/
 site/demo-shot.png
 site/*.png
 .workbuddy/
+site/build/exe-test/
+
+# PyInstaller 打包产物（exe 走 GitHub Releases 分发，不进仓库）
+build/
+dist/
+*.spec
 
 # 云端应用发布记录（本地）
 .wbapp_*.genie
