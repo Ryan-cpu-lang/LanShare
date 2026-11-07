@@ -20,6 +20,7 @@ import tempfile
 import zipfile
 import mimetypes
 import posixpath
+import ipaddress
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
@@ -75,9 +76,17 @@ CONFIG_PATH = os.path.join(DATA_DIR, 'config.json')
 SECRET_PATH = os.path.join(DATA_DIR, '.session_secret')
 PORT = int(os.environ.get('PORT', 8080))
 HOST = '0.0.0.0'
-MAX_UPLOAD = 500 * 1024 * 1024  # 单次请求上限 500MB
+MAX_UPLOAD = 500 * 1024 * 1024  # 单次上传上限 500MB
 COOKIE_NAME = 'lanshare_session'
 
+# ---------------- 抗压参数 ----------------
+# 这些是防止「一个人就能把服务打死」的硬限制，不是性能调优参数。
+MAX_JSON_BODY = 2 * 1024 * 1024   # 普通 JSON 接口的请求体上限
+MAX_CONNECTIONS = 64              # 同时处理的连接数，超出的直接 503
+MAX_REQ_PER_CONN = 200            # 单个 keep-alive 连接最多处理多少个请求
+SOCKET_TIMEOUT = 20               # 单次 socket 读写的空闲超时（挡 slowloris）
+BODY_TIMEOUT = 30                 # 读完一个普通请求体的总时限
+MAX_UPLOAD_SLOTS = 2              # 同时进行的上传数量（上传是整体进内存的）
 DEFAULT_CONFIG = {
     'pin': None,              # 访问 PIN；为空则首次启动自动生成
     'session_hours': 12,      # 登录有效期（小时）
@@ -86,6 +95,10 @@ DEFAULT_CONFIG = {
     'read_only': False,       # 只读模式：只能浏览/下载，不能上传修改
     'cookie_secure': False,   # 走 HTTPS 时设为 true
     'trust_proxy': False,     # 放在 Nginx / Cloudflare 后面时设为 true
+    # 只有来自这些网段的请求，才会采信 X-Forwarded-For。
+    # 留空默认只信任本机（127.0.0.1），足以配合 cloudflared / 本机 nginx；
+    # 反代在**另一台机器**上时必须把它的地址/网段写进来，否则真实 IP 识别不到。
+    'trusted_proxies': [],
     'https': False,           # 是否直接以 HTTPS 提供服务
     'cert_file': 'cert.pem',  # HTTPS 证书
     'key_file': 'key.pem',    # HTTPS 私钥
@@ -195,6 +208,37 @@ def load_secret():
     return data
 
 
+def _parse_networks(values):
+    """把配置里的 ["10.0.0.0/8", ...] 解析成网段对象，写错的跳过并提示。"""
+    nets = []
+    if isinstance(values, str):
+        values = [values]
+    for value in values or []:
+        text = str(value).strip()
+        if not text:
+            continue
+        try:
+            nets.append(ipaddress.ip_network(text, strict=False))
+        except ValueError:
+            sys.stderr.write(f'[警告] config.json 的 trusted_proxies 里有无效网段：{text}\n')
+    return nets
+
+
+def _ip_in_networks(ip, networks):
+    """判断 ip 是否落在给定网段里；解析失败一律当「不在」。"""
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    for net in networks:
+        try:
+            if addr in net:
+                return True
+        except TypeError:      # IPv4 地址和 IPv6 网段比较会抛这个
+            continue
+    return False
+
+
 CFG = load_config()
 PIN = str(CFG['pin'])
 SECRET = load_secret()
@@ -202,9 +246,29 @@ SESSION_TTL = int(CFG.get('session_hours', 12)) * 3600
 READ_ONLY = bool(CFG.get('read_only', False))
 MAX_ATTEMPTS = int(CFG.get('max_attempts', 5))
 LOCK_SECONDS = int(CFG.get('lock_seconds', 300))
+TRUSTED_PROXIES = _parse_networks(CFG.get('trusted_proxies'))
+if not TRUSTED_PROXIES:
+    # 没显式配置时，默认只信「本机上的代理」：
+    # cloudflared / nginx 通常和服务在同一台机器上，直连对端恒为 127.0.0.1，
+    # 这时不采信它转发的真实 IP，所有人就会被当成同一个来源，一人输错全员锁死。
+    # 而外部攻击者直连时对端是公网地址、不是环回，所以这个默认值不会被利用。
+    TRUSTED_PROXIES = _parse_networks(['127.0.0.0/8', '::1/128'])
 
 # 登录失败计数： ip -> [时间戳, ...]
 _FAILS = {}
+_FAILS_MAX_KEYS = 4096        # 字典条目上限，防止伪造来源把它撑爆
+_FAILS_LOCK = threading.Lock()
+
+# 全局失败计数（不分 IP）。这是防「换 IP / 伪造 X-Forwarded-For 绕过封禁」的最后一道闸：
+# 不管来源怎么伪装，整个服务在一个窗口期内能接受的失败次数是固定的。
+_GLOBAL_FAILS = []
+_GLOBAL_LOCK_UNTIL = 0.0
+_GLOBAL_MAX_FAILS = 60        # 窗口内允许的失败总数
+_GLOBAL_WINDOW = 300          # 全局统计窗口（秒）
+_GLOBAL_MAX_LOCK = 3600       # 全局锁定最长 1 小时
+
+# 上传是整体读进内存的，同时来几个 500MB 就直接 OOM，所以限制并发数
+_UPLOAD_SLOTS = threading.BoundedSemaphore(MAX_UPLOAD_SLOTS)
 
 # ---------------- 扫码登录票据 ----------------
 # 电脑上点「手机扫码」时生成一张一次性票据，二维码里带的是 /q/<票据>。
@@ -265,20 +329,69 @@ def verify_token(token):
         return False
 
 
+def _prune_fails(now):
+    """清理过期失败记录。条目过多时整体收缩。调用方必须持有 _FAILS_LOCK。"""
+    cutoff = now - LOCK_SECONDS
+    for ip in [k for k, v in _FAILS.items() if not v or v[-1] < cutoff]:
+        _FAILS.pop(ip, None)
+    if len(_FAILS) > _FAILS_MAX_KEYS:
+        # 还超就按最近失败时间砍掉最旧的一半。宁可放宽个别 IP，
+        # 也不能让一个伪造来源头的人把内存喂爆。
+        order = sorted(_FAILS.items(), key=lambda kv: kv[1][-1] if kv[1] else 0)
+        for ip, _ in order[:len(order) // 2]:
+            _FAILS.pop(ip, None)
+
+
 def locked_until(ip):
     now = time.time()
-    records = [t for t in _FAILS.get(ip, []) if now - t < LOCK_SECONDS]
-    if records:
-        _FAILS[ip] = records
-    else:
-        _FAILS.pop(ip, None)
+    with _FAILS_LOCK:
+        records = [t for t in _FAILS.get(ip, []) if now - t < LOCK_SECONDS]
+        if records:
+            _FAILS[ip] = records
+        else:
+            _FAILS.pop(ip, None)
     if len(records) >= MAX_ATTEMPTS:
         return int(LOCK_SECONDS - (now - records[0])) + 1
     return 0
 
 
+def global_lock_remaining():
+    """全局锁定还剩多少秒，0 表示没锁。"""
+    global _GLOBAL_LOCK_UNTIL
+    now = time.time()
+    with _FAILS_LOCK:
+        if _GLOBAL_LOCK_UNTIL > now:
+            return int(_GLOBAL_LOCK_UNTIL - now) + 1
+        _GLOBAL_LOCK_UNTIL = 0.0
+    return 0
+
+
+def clear_failures(ip):
+    with _FAILS_LOCK:
+        _FAILS.pop(ip, None)
+
+
 def record_failure(ip):
-    _FAILS.setdefault(ip, []).append(time.time())
+    """记一次失败，返回该 IP 还剩几次机会（<=0 表示已锁定）。"""
+    global _GLOBAL_LOCK_UNTIL
+    now = time.time()
+    with _FAILS_LOCK:
+        records = [t for t in _FAILS.get(ip, []) if now - t < LOCK_SECONDS]
+        records.append(now)
+        _FAILS[ip] = records
+        _prune_fails(now)
+        left = MAX_ATTEMPTS - len(records)
+
+        _GLOBAL_FAILS.append(now)
+        cutoff = now - _GLOBAL_WINDOW
+        _GLOBAL_FAILS[:] = [t for t in _GLOBAL_FAILS if t > cutoff]
+        if len(_GLOBAL_FAILS) >= _GLOBAL_MAX_FAILS:
+            # 累计失败越多，锁得越久，防止被慢慢磨开
+            over = len(_GLOBAL_FAILS) - _GLOBAL_MAX_FAILS
+            dur = min(LOCK_SECONDS * (2 ** (over // _GLOBAL_MAX_FAILS)), _GLOBAL_MAX_LOCK)
+            _GLOBAL_LOCK_UNTIL = now + dur
+            _GLOBAL_FAILS.clear()
+    return left
 
 
 def safe_join(base, *paths):
@@ -435,6 +548,39 @@ def human_size(n):
         n /= 1024.0
 
 
+class PayloadTooLarge(Exception):
+    """请求体超过接口允许的上限，由调用方转成 413。"""
+
+
+# ---------------- 慢连接看门狗 ----------------
+# socket 超时只能挡「连上就完全不动」的客户端。slowloris 会每隔十几秒发一个字节续命，
+# 永远不会触发空闲超时，64 个这样的连接就能把槽位占满、把服务憋死。
+# 所以额外记录每条连接的「最近一次有进展」时间，超时就强制 shutdown。
+_ACTIVE_CONNS = {}          # socket -> [注册时间, 最近进展时间]
+_ACTIVE_LOCK = threading.Lock()
+HEADER_DEADLINE = 30        # 从连上到收完一次请求，最多给 30 秒
+
+
+def _conn_watchdog():
+    while True:
+        time.sleep(5)
+        now = time.monotonic()
+        with _ACTIVE_LOCK:
+            stale = [s for s, rec in _ACTIVE_CONNS.items()
+                     if now - rec[1] > HEADER_DEADLINE]
+            for s in stale:
+                _ACTIVE_CONNS.pop(s, None)
+        for s in stale:
+            try:
+                s.shutdown(socket.SHUT_RDWR)   # 让阻塞中的 read 立刻返回
+            except Exception:
+                pass
+            try:
+                s.close()
+            except Exception:
+                pass
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = 'LanShare/2.0'
     protocol_version = 'HTTP/1.1'
@@ -463,12 +609,45 @@ class Handler(BaseHTTPRequestHandler):
     def _err(self, code, msg):
         self._json(code, {'error': msg})
 
+    def _read_body(self, length, limit, timeout=BODY_TIMEOUT):
+        """按块读取请求体，绝不一次性 allocate。
+
+        以前是 self.rfile.read(length)，等于让客户端用一个 Content-Length 头
+        命令服务端分配任意大小的内存 —— 30 个「只发 1 字节但声明 200MB」的请求
+        就能把进程顶到 3GB。这里改成：
+        · 超过 limit 直接抛 ValueError（调用方回 413），不分配；
+        · 分块读，累计不超过 limit；
+        · 有总时限，读不完就放弃，防止用极慢的滴流拖住线程。
+        """
+        if length <= 0:
+            return b''
+        if length > limit:
+            raise ValueError('too large')
+        deadline = time.monotonic() + timeout
+        chunks = []
+        got = 0
+        while got < length:
+            if time.monotonic() > deadline:
+                raise ValueError('timeout')
+            chunk = self.rfile.read(min(64 * 1024, length - got))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            got += len(chunk)
+            self._touch()          # 有数据进来就续命，纯滴流也会被 HEADER_DEADLINE 兜住
+        return b''.join(chunks)
+
     def _read_json(self):
         try:
-            length = max(0, int(self.headers.get('Content-Length') or 0))
+            length = int(self.headers.get('Content-Length') or 0)
         except ValueError:
             length = 0
-        raw = self.rfile.read(length) if length else b'{}'
+        if length < 0:
+            length = 0
+        try:
+            raw = self._read_body(length, MAX_JSON_BODY)
+        except ValueError:
+            raise PayloadTooLarge()
         try:
             return json.loads(raw.decode('utf-8') or '{}')
         except Exception:
@@ -478,23 +657,101 @@ class Handler(BaseHTTPRequestHandler):
         # 精简日志，避免刷屏
         sys.stderr.write('[%s] %s\n' % (datetime.now().strftime('%H:%M:%S'), fmt % args))
 
+    def setup(self):
+        super().setup()
+        # 登记到看门狗，并做两件事：
+        # · TCP 层面的 keepalive，让半死的连接能被内核发现
+        # · 关掉 Nagle，小响应（JSON）不必等 40ms 再发
+        try:
+            self.connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except Exception:
+            pass
+        with _ACTIVE_LOCK:
+            _ACTIVE_CONNS[self.connection] = [time.monotonic(), time.monotonic()]
+
+    def finish(self):
+        try:
+            with _ACTIVE_LOCK:
+                _ACTIVE_CONNS.pop(self.connection, None)
+        finally:
+            try:
+                super().finish()
+            except Exception:
+                pass
+
+    def _touch(self):
+        """标记这条连接「还活着、有进展」，看门狗据此判断要不要掐掉。"""
+        with _ACTIVE_LOCK:
+            rec = _ACTIVE_CONNS.get(self.connection)
+            if rec is not None:
+                rec[1] = time.monotonic()
+
     def handle_one_request(self):
+        # 单个 keep-alive 连接处理的请求数上限：防止一条连接无限复用，
+        # 在限流统计里「看不见」地持续打完所有请求
+        self._req_count = getattr(self, '_req_count', 0) + 1
+        if self._req_count > MAX_REQ_PER_CONN:
+            self.close_connection = True
+            try:
+                self._err(429, '连接请求次数过多，请重新连接')
+            except Exception:
+                pass
+            return
         # 客户端提前断开（刷新、取消下载等）属于正常现象，不输出堆栈
         try:
             super().handle_one_request()
         except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError):
             self.close_connection = True
+        except PayloadTooLarge:
+            # 请求体太大：把剩下的请求体丢掉，回 413 并断开，别让连接卡在半路
+            self.close_connection = True
+            try:
+                self._err(413, '请求体过大')
+            except Exception:
+                pass
+        except Exception:
+            # 任何未预料的异常都不该让整个线程带着堆栈死掉，
+            # 更不能让客户端看到「连接被重置」而不知道发生了什么
+            self.close_connection = True
+            try:
+                self._err(500, '服务器内部错误')
+            except Exception:
+                pass
 
     # ---------- 会话 / 客户端 ----------
     def client_ip(self):
-        if CFG.get('trust_proxy'):
-            fwd = self.headers.get('X-Forwarded-For')
-            if fwd:
-                return fwd.split(',')[0].strip()
-            real = self.headers.get('CF-Connecting-IP') or self.headers.get('X-Real-IP')
-            if real:
-                return real.strip()
-        return self.client_address[0]
+        """识别真实来源 IP。
+
+        安全要点（这里以前是个大洞）：
+        X-Forwarded-For 是**客户端可以随便填的**。如果直接取它的第一段，
+        攻击者每次请求换一个假 IP，就能把「按 IP 封禁」完全绕开，无限次试 PIN。
+
+        正确做法：
+        1. 直连对端必须是可信反代（trusted_proxies，默认只含环回地址），
+           否则它给的 XFF 一律不作数 —— 这样外部攻击者直连伪造 XFF 完全无效。
+        2. 从 XFF 右边往左数，跳过所有可信代理，第一个非代理地址才是真实客户端。
+           （左边是客户端自己编的，右边才是各级代理依次追加的）
+        """
+        peer = self.client_address[0]
+        if not CFG.get('trust_proxy'):
+            return peer
+        # 直连对端不可信 → 它说的任何 XFF 都不作数
+        if not _ip_in_networks(peer, TRUSTED_PROXIES):
+            return peer
+
+        fwd = self.headers.get('X-Forwarded-For')
+        if fwd:
+            hops = [h.strip() for h in fwd.split(',') if h.strip()]
+            # 从右往左砍掉可信代理，剩下的最后一个才是真人；
+            # 整条链全是可信代理说明没拿到真实地址，退回直连地址更安全
+            for hop in reversed(hops):
+                if not _ip_in_networks(hop, TRUSTED_PROXIES):
+                    return hop
+            return peer
+        real = self.headers.get('CF-Connecting-IP') or self.headers.get('X-Real-IP')
+        if real and _ip_in_networks(peer, TRUSTED_PROXIES):
+            return real.strip()
+        return peer
 
     def cookie_token(self):
         raw = self.headers.get('Cookie') or ''
@@ -624,6 +881,11 @@ class Handler(BaseHTTPRequestHandler):
         if wait:
             return self._json(429, {
                 'error': f'尝试次数过多，请 {wait} 秒后再试', 'retryAfter': wait})
+        # 全局闸：即使攻击者不断换 IP / 伪造来源头，整个服务的失败总数也封顶
+        gwait = global_lock_remaining()
+        if gwait:
+            return self._json(429, {
+                'error': f'尝试过于频繁，请 {gwait} 秒后再试', 'retryAfter': gwait})
 
         data = self._read_json()
         pin = str(data.get('pin') or '').strip()
@@ -632,11 +894,10 @@ class Handler(BaseHTTPRequestHandler):
 
         # compare_digest 不接受非 ASCII str，先编码成 bytes 才支持中文/emoji PIN
         if hmac.compare_digest(pin.encode('utf-8'), PIN.encode('utf-8')):
-            _FAILS.pop(ip, None)
+            clear_failures(ip)
             return self._login_ok()
 
-        record_failure(ip)
-        left = MAX_ATTEMPTS - len(_FAILS.get(ip, []))
+        left = record_failure(ip)
         if left <= 0:
             return self._json(429, {
                 'error': f'错误次数过多，已锁定 {LOCK_SECONDS} 秒',
@@ -672,7 +933,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(410, QR_FAIL_HTML, 'text/html; charset=utf-8')
 
         ip = self.client_ip()
-        _FAILS.pop(ip, None)   # 扫码等于证明「人就在电脑旁边」，清掉失败计数
+        clear_failures(ip)   # 扫码等于证明「人就在电脑旁边」，清掉失败计数
         return self._login_ok(redirect_to='/')
 
     def api_logout(self):
@@ -752,6 +1013,7 @@ class Handler(BaseHTTPRequestHandler):
                     break
                 self.wfile.write(chunk)
                 remaining -= len(chunk)
+                self._touch()      # 大文件慢速下载是正常行为，别被看门狗误杀
 
     def api_zip(self, rel_path):
         """把文件夹打包成 zip 下载"""
@@ -783,7 +1045,14 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             if self.command != 'HEAD':
                 with open(tmp.name, 'rb') as f:
-                    shutil.copyfileobj(f, self.wfile)
+                    # 不用 shutil.copyfileobj：边拷边刷看门狗，
+                    # 否则大压缩包传给慢客户端会被当成「卡死」掐掉
+                    while True:
+                        chunk = f.read(256 * 1024)
+                        if not chunk:
+                            break
+                        self.wfile.write(chunk)
+                        self._touch()
         finally:
             try:
                 os.remove(tmp.name)
@@ -922,10 +1191,13 @@ class Handler(BaseHTTPRequestHandler):
         if not ctype.startswith('multipart/form-data'):
             return self._err(400, '请使用表单上传')
         try:
-            length = max(0, int(self.headers.get('Content-Length') or 0))
+            length = int(self.headers.get('Content-Length') or 0)
         except ValueError:
             length = 0
+        if length <= 0:
+            return self._err(400, '没有收到文件内容')
         if length > MAX_UPLOAD:
+            self.close_connection = True
             return self._err(413, '文件过大（上限 500MB）')
 
         # 目标子目录通过查询参数传入
@@ -941,52 +1213,66 @@ class Handler(BaseHTTPRequestHandler):
         if not boundary:
             return self._err(400, '上传格式错误')
 
-        body = self.rfile.read(length)
-        saved = []
-        skipped = []
-        for filename, data in parse_multipart(body, boundary.encode('utf-8', 'replace')):
-            if not filename:
-                continue
-            # 关键：Windows 下 os.path.basename('a:b.txt') 会返回 'b.txt'，
-            # 冒号被静默截断，导致校验漏掉非法字符。所以必须先用原始名查非法字符，
-            # 再去目录前缀。
-            if any(ch in filename for ch in _BAD_NAME_CHARS):
-                skipped.append(f'{filename}: 文件名包含非法字符 <>:"/\\|?*')
-                continue
-            # 去掉浏览器可能带上的目录前缀，再统一校验文件名
-            filename = os.path.basename(filename.replace('\\', '/')).strip()
-            ok, why = check_filename(filename)
-            if not ok:
-                skipped.append(f'{filename or "(空名)"}: {why}')
-                continue
+        # 上传体是整体进内存再解析的，几个 500MB 并发就能把内存吃光。
+        # 用信号量限制同时进行的上传数，满了马上回 503，而不是把进程拖死。
+        if not _UPLOAD_SLOTS.acquire(blocking=False):
+            self.close_connection = True
+            return self._json(503, {'error': '当前上传人数较多，请稍后重试'})
+        try:
             try:
-                target = safe_join(SHARED_DIR, rel_dir, filename)
-            except PermissionError:
-                skipped.append(f'{filename}: 目标路径越界')
-                continue
-            # 重名自动加序号
-            base, ext = os.path.splitext(target)
-            idx = 1
-            while os.path.exists(target):
-                target = f'{base} ({idx}){ext}'
-                idx += 1
-            try:
-                os.makedirs(os.path.dirname(target), exist_ok=True)
-                with open(target, 'wb') as out:
-                    out.write(data)
-            except OSError as e:
-                # 单个文件写失败不影响同批其他文件
-                skipped.append(f'{filename}: {e.strerror or e}')
-                continue
-            saved.append({'name': os.path.basename(target),
-                          'size': len(data),
-                          'sizeText': human_size(len(data))})
-        if not saved:
-            msg = '没有收到有效文件'
-            if skipped:
-                msg += '（' + '；'.join(skipped[:3]) + '）'
-            return self._err(400, msg)
-        self._json(200, {'ok': True, 'files': saved, 'skipped': skipped})
+                body = self._read_body(length, MAX_UPLOAD, timeout=BODY_TIMEOUT * 6)
+            except ValueError as e:
+                self.close_connection = True
+                if str(e) == 'too large':
+                    return self._err(413, '文件过大（上限 500MB）')
+                return self._err(408, '上传超时，请重试')
+            saved = []
+            skipped = []
+            for filename, data in parse_multipart(body, boundary.encode('utf-8', 'replace')):
+                if not filename:
+                    continue
+                # 关键：Windows 下 os.path.basename('a:b.txt') 会返回 'b.txt'，
+                # 冒号被静默截断，导致校验漏掉非法字符。所以必须先用原始名查非法字符，
+                # 再去目录前缀。
+                if any(ch in filename for ch in _BAD_NAME_CHARS):
+                    skipped.append(f'{filename}: 文件名包含非法字符 <>:"/\\|?*')
+                    continue
+                # 去掉浏览器可能带上的目录前缀，再统一校验文件名
+                filename = os.path.basename(filename.replace('\\', '/')).strip()
+                ok, why = check_filename(filename)
+                if not ok:
+                    skipped.append(f'{filename or "(空名)"}: {why}')
+                    continue
+                try:
+                    target = safe_join(SHARED_DIR, rel_dir, filename)
+                except PermissionError:
+                    skipped.append(f'{filename}: 目标路径越界')
+                    continue
+                # 重名自动加序号
+                base, ext = os.path.splitext(target)
+                idx = 1
+                while os.path.exists(target):
+                    target = f'{base} ({idx}){ext}'
+                    idx += 1
+                try:
+                    os.makedirs(os.path.dirname(target), exist_ok=True)
+                    with open(target, 'wb') as out:
+                        out.write(data)
+                except OSError as e:
+                    # 单个文件写失败不影响同批其他文件
+                    skipped.append(f'{filename}: {e.strerror or e}')
+                    continue
+                saved.append({'name': os.path.basename(target),
+                              'size': len(data),
+                              'sizeText': human_size(len(data))})
+            if not saved:
+                msg = '没有收到有效文件'
+                if skipped:
+                    msg += '（' + '；'.join(skipped[:3]) + '）'
+                return self._err(400, msg)
+            return self._json(200, {'ok': True, 'files': saved, 'skipped': skipped})
+        finally:
+            _UPLOAD_SLOTS.release()
 
     def api_delete(self):
         data = self._read_json()
@@ -1015,6 +1301,56 @@ class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
     # 所以这里在 Windows 上必须关掉，让第二次启动干脆地失败。
     # Unix 上保留，避免刚关就重启时被 TIME_WAIT 卡住。
     allow_reuse_address = os.name != 'nt'
+    # 已建立但尚未 accept 的连接排队长度。默认只有 5，
+    # 突发流量下多出来的连接会被内核直接 RST，用户看到「网页打不开」。
+    request_queue_size = 128
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # 连接槽位：超过 MAX_CONNECTIONS 就直接拒掉，避免线程数被慢连接撑爆。
+        # 这是抗 slowloris / 半开连接轰炸最关键的一道闸。
+        self._conn_slots = threading.BoundedSemaphore(MAX_CONNECTIONS)
+
+    def process_request(self, request, client_address):
+        if not self._conn_slots.acquire(blocking=False):
+            # 满了：立刻回一条 503 再关闭，别让内核队列和线程继续堆积
+            try:
+                request.settimeout(1)
+                request.sendall(
+                    b'HTTP/1.1 503 Service Unavailable\r\n'
+                    b'Content-Type: text/plain; charset=utf-8\r\n'
+                    b'Content-Length: 10\r\n'
+                    b'Connection: close\r\n\r\nserver busy')
+            except Exception:
+                pass
+            finally:
+                try:
+                    self.shutdown_request(request)
+                except Exception:
+                    pass
+            return
+        try:
+            super().process_request(request, client_address)
+        except Exception:
+            self._conn_slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            try:
+                self._conn_slots.release()
+            except ValueError:
+                pass
+
+    def finish_request(self, request, client_address):
+        # 每个连接上的读写都要有超时，否则客户端「连上不说话」就能一直占着线程
+        try:
+            request.settimeout(SOCKET_TIMEOUT)
+        except Exception:
+            pass
+        return super().finish_request(request, client_address)
 
 
 def local_ips():
@@ -1136,6 +1472,9 @@ def main():
             webbrowser.open(local_url)
         except Exception:
             pass
+
+    # 慢连接看门狗：常驻后台线程，定期掐掉「一直连着什么也不做」的连接
+    threading.Thread(target=_conn_watchdog, name='conn-watchdog', daemon=True).start()
 
     try:
         httpd.serve_forever()

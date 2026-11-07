@@ -131,6 +131,13 @@ section { position: relative; z-index: 1; }
 .btn .arrow { transition: transform .18s; }
 .btn:hover .arrow { transform: translateX(3px); }
 
+.hero-hint {
+  display: none;
+  max-width: 560px; margin: 0 auto 18px; padding: 12px 16px;
+  border-radius: 10px; border: 1px solid rgba(90,200,150,.28);
+  background: rgba(40,120,90,.14); color: #b6d9c5;
+  font-size: 13px; line-height: 1.65; text-align: left;
+}
 .hero-meta {
   display: flex; gap: 22px; justify-content: center; flex-wrap: wrap;
   color: #7386a3; font-size: 12.5px; margin-top: 8px;
@@ -362,6 +369,16 @@ footer {
   .hero { padding: 52px 0 30px; }
   .sec { padding: 60px 0 0; }
 }
+
+/* 手机/平板：exe 在这儿没用，先讲清楚，再把公网快传顶上来 */
+@media (pointer: coarse), (max-width: 620px) {
+  .hero-hint { display: block; }
+  .hero-actions .btn-dl { display: none; }
+  .hero-actions .btn-relay {
+    background: linear-gradient(160deg, #3fc98c, #2fae78);
+    border-color: #3fc98c; color: #04241a; font-weight: 500;
+  }
+}
 </style>
 </head>
 <body>
@@ -399,10 +416,15 @@ footer {
     </p>
 
     <div class="hero-actions">
-      <a class="btn primary" href="./LanShare.exe" download>下载 LanShare.exe（8.7 MB 免安装） <span class="arrow">↓</span></a>
+      <a class="btn primary btn-dl" href="./LanShare.exe" download>下载 LanShare.exe（8.7 MB 免安装） <span class="arrow">↓</span></a>
       <a class="btn" href="#demo">在线试用</a>
-      <a class="btn" href="#relay">公网传输 <span class="arrow">→</span></a>
+      <a class="btn btn-relay" href="#relay">公网传输 <span class="arrow">→</span></a>
     </div>
+
+    <p class="hero-hint">
+      你现在用的是手机 —— <b>exe 是 Windows 电脑程序，手机上装不了</b>。<br>
+      手机要给别的设备发文件，用人人都能开的 <b>公网快传</b>，不需要电脑。
+    </p>
 
     <div class="hero-meta">
       <span>🐍 Python 3.8+</span>
@@ -532,7 +554,8 @@ footer {
     <div class="sec-head">
       <span class="sec-kicker">Quick Start</span>
       <h2>三步，两分钟</h2>
-      <p>不用装 Python，不用记 IP，不用输密码。</p>
+      <p>不用装 Python，不用记 IP，不用输密码。<br>
+         <span style="color:#8fa6c6">需要一台 Windows 电脑常开着。手里只有手机的话，直接用<a href="#relay" style="color:#7bf0b6">公网快传</a>。</span></p>
     </div>
 
     <div class="start-grid">
@@ -540,9 +563,9 @@ footer {
         <div class="step">
           <span class="step-n">1</span>
           <div>
-            <h4>下载 LanShare.exe</h4>
+            <h4>在电脑上下载 LanShare.exe</h4>
             <p><a class="dl-link" href="./LanShare.exe" download>点这里下载（8.7 MB，免安装）</a><br>
-               放到桌面或任意文件夹都行，双击就能跑。</p>
+               放进桌面或任意文件夹，双击就能跑。<b>这个文件只能在 Windows 电脑上运行，手机装不了。</b></p>
           </div>
         </div>
         <div class="step">
