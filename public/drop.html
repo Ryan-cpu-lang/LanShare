@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="format-detection" content="telephone=no, date=no, address=no, email=no">
+<meta name="theme-color" content="#0f1420">
+<meta name="apple-mobile-web-app-title" content="发到电脑">
+<title>发到电脑</title>
+<!-- 内联 SVG 图标：浏览器默认会去请求 /favicon.ico，那个文件不存在会报 404，
+     在控制台里很脏；而且多一个请求，弱网下没必要。 -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%93%A5%3C/text%3E%3C/svg%3E">
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%93%A5%3C/text%3E%3C/svg%3E">
+<style>
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0}
+  body{
+    min-height:100vh;
+    background:#0f1420;color:#e6ecf5;
+    font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    padding:calc(20px + env(safe-area-inset-top)) 16px calc(28px + env(safe-area-inset-bottom));
+    display:flex;flex-direction:column;align-items:center;
+  }
+  .wrap{width:100%;max-width:460px}
+
+  /* 顶部：说明这台电脑是谁、往哪儿发 */
+  .head{text-align:center;margin-bottom:22px}
+  .head .ico{font-size:34px;line-height:1;margin-bottom:10px}
+  .head h1{font-size:20px;margin:0 0 6px;font-weight:600}
+  .head p{margin:0;font-size:13.5px;color:#8b9bb4;line-height:1.6}
+  .head .where{
+    display:inline-block;margin-top:10px;padding:5px 12px;border-radius:999px;
+    background:#1b2334;border:1px solid #2a3448;color:#9fb0c8;font-size:12.5px;
+  }
+  .head .where b{color:#7bf0b6;font-weight:600}
+
+  /* 主按钮：手指一戳就该点到，所以做得很大 */
+  .pick{
+    display:flex;align-items:center;justify-content:center;gap:10px;
+    width:100%;min-height:96px;padding:20px;
+    border:0;border-radius:18px;cursor:pointer;
+    background:linear-gradient(160deg,#3fc98c,#2fae78);
+    color:#04241a;font-size:18px;font-weight:600;font-family:inherit;
+    box-shadow:0 8px 24px rgba(63,201,140,.22);
+    transition:transform .12s ease,box-shadow .12s ease;
+  }
+  .pick:active{transform:scale(.975);box-shadow:0 4px 14px rgba(63,201,140,.18)}
+  .pick .pi{font-size:26px;line-height:1}
+  .pick[disabled]{opacity:.5;pointer-events:none;box-shadow:none}
+
+  /* 拍照单独一个入口：手机相册里翻找照片，往往比直接拍慢 */
+  .sub-actions{display:flex;gap:10px;margin-top:12px}
+  .sub{
+    flex:1;display:flex;align-items:center;justify-content:center;gap:7px;
+    min-height:52px;padding:10px 12px;
+    border-radius:14px;border:1px solid #2a3448;background:#161d2e;
+    color:#c3cede;font-size:14.5px;font-family:inherit;cursor:pointer;
+  }
+  .sub:active{background:#1c2436}
+
+  /* 拖进来的文件列表 + 进度 */
+  .queue{margin-top:20px}
+  .qhead{
+    display:flex;justify-content:space-between;align-items:baseline;
+    font-size:12.5px;color:#6f7f99;margin-bottom:8px;padding:0 2px;
+  }
+  .qhead .cnt{color:#9fb0c8}
+  .card{
+    background:#161d2e;border:1px solid #2a3448;border-radius:14px;
+    overflow:hidden;
+  }
+  .row{
+    display:flex;align-items:center;gap:10px;
+    padding:12px 14px;border-bottom:1px solid #202839;
+  }
+  .row:last-child{border-bottom:0}
+  .row .fi{flex:0 0 auto;font-size:18px;line-height:1}
+  .row .fmain{flex:1;min-width:0}
+  .row .fname{
+    font-size:14px;color:#e6ecf5;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  }
+  .row .fmeta{font-size:11.5px;color:#6f7f99;margin-top:2px}
+  .row .fstate{flex:0 0 auto;font-size:12px;color:#7bf0b6;white-space:nowrap}
+  .row.err .fstate{color:#ff8b9a}
+  .row.err .fname{color:#ffb3bd}
+
+  /* 整体进度条：一次传多个时，用户只关心「还有多久」 */
+  .bar-wrap{margin-top:14px}
+  .bar{
+    height:6px;border-radius:999px;background:#1b2334;overflow:hidden;
+  }
+  .bar-fill{
+    height:100%;width:0;border-radius:999px;
+    background:linear-gradient(90deg,#3fc98c,#5ee0a6);
+    transition:width .2s ease;
+  }
+  .bar-txt{
+    margin-top:8px;font-size:12.5px;color:#8b9bb4;text-align:center;
+  }
+
+  /* 传完之后的大反馈：手机屏幕小，成功要靠颜色和文字一起说 */
+  .done{
+    margin-top:20px;padding:22px 18px;border-radius:16px;text-align:center;
+    background:rgba(40,120,90,.16);border:1px solid rgba(90,200,150,.32);
+  }
+  .done .di{font-size:38px;line-height:1;margin-bottom:10px}
+  .done h2{font-size:17px;margin:0 0 6px;color:#7bf0b6;font-weight:600}
+  .done p{margin:0;font-size:13px;color:#a8c4b4;line-height:1.6}
+
+  .foot{
+    margin-top:26px;text-align:center;font-size:12px;color:#4f5d73;line-height:1.7;
+  }
+  .toast{
+    position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom));
+    transform:translateX(-50%) translateY(16px);
+    max-width:88vw;padding:12px 18px;border-radius:12px;
+    background:#43202a;border:1px solid #6b2f3d;color:#ffdde2;
+    font-size:13.5px;line-height:1.5;text-align:center;
+    opacity:0;pointer-events:none;transition:opacity .22s,transform .22s;
+    z-index:50;
+  }
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  .hidden{display:none !important}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="head">
+    <div class="ico">📥</div>
+    <h1>发到电脑</h1>
+    <p>选好文件就会自动传过去，不用点发送</p>
+    <div class="where">保存到 <b id="whereName">手机收件箱</b></div>
+  </div>
+
+  <!-- 选中后自动开始传，所以按钮文案不写「发送」而写「选择」 -->
+  <button class="pick" id="btnPick" type="button">
+    <span class="pi">＋</span><span>选择照片或文件</span>
+  </button>
+
+  <div class="sub-actions">
+    <button class="sub" id="btnPhoto" type="button">📷 拍照</button>
+    <button class="sub" id="btnCamera" type="button">🎥 录像</button>
+  </div>
+
+  <!-- 三个 input：文件、拍照、录像。accept 分开写，手机上才会直接开对应界面 -->
+  <input type="file" id="inFile" multiple hidden>
+  <input type="file" id="inPhoto" accept="image/*" capture="environment" hidden>
+  <input type="file" id="inCamera" accept="video/*" capture="environment" hidden>
+
+  <div class="queue hidden" id="queue">
+    <div class="qhead">
+      <span class="cnt" id="qCount">待发送 0 个</span>
+      <span id="qSent"></span>
+    </div>
+    <div class="card" id="qList"></div>
+    <div class="bar-wrap">
+      <div class="bar"><div class="bar-fill" id="barFill"></div></div>
+      <div class="bar-txt" id="barTxt">准备中…</div>
+    </div>
+  </div>
+
+  <div class="done hidden" id="done">
+    <div class="di">✅</div>
+    <h2 id="doneTitle">已发到电脑</h2>
+    <p id="doneText">电脑上打开共享页面就能看到</p>
+  </div>
+
+  <div class="foot">
+    同一个 WiFi 才能连上 · 关掉这个页面不影响已传完的文件<br>
+    <span id="ticketState"></span>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  var TICKET = '{{DROP_TICKET}}';
+  var MAX_FILES = 200;
+
+  var el = {
+    pick: document.getElementById('btnPick'),
+    photo: document.getElementById('btnPhoto'),
+    camera: document.getElementById('btnCamera'),
+    inFile: document.getElementById('inFile'),
+    inPhoto: document.getElementById('inPhoto'),
+    inCamera: document.getElementById('inCamera'),
+    queue: document.getElementById('queue'),
+    qCount: document.getElementById('qCount'),
+    qSent: document.getElementById('qSent'),
+    qList: document.getElementById('qList'),
+    barFill: document.getElementById('barFill'),
+    barTxt: document.getElementById('barTxt'),
+    done: document.getElementById('done'),
+    doneTitle: document.getElementById('doneTitle'),
+    doneText: document.getElementById('doneText'),
+    whereName: document.getElementById('whereName'),
+    ticketState: document.getElementById('ticketState'),
+    toast: document.getElementById('toast')
+  };
+
+  var sentTotal = 0;
+  var busy = false;
+  var toastTimer = null;
+
+  function toast(msg) {
+    el.toast.textContent = msg;
+    el.toast.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () {
+      el.toast.classList.remove('show');
+    }, 3600);
+  }
+
+  function humanSize(n) {
+    if (n < 1024) return n + ' B';
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+    if (n < 1024 * 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + ' MB';
+    return (n / 1024 / 1024 / 1024).toFixed(2) + ' GB';
+  }
+
+  function iconFor(file) {
+    var t = (file.type || '').toLowerCase();
+    if (t.indexOf('image/') === 0) return '🖼';
+    if (t.indexOf('video/') === 0) return '🎬';
+    if (t.indexOf('audio/') === 0) return '🎵';
+    var ext = (file.name.split('.').pop() || '').toLowerCase();
+    if (['pdf'].indexOf(ext) >= 0) return '📕';
+    if (['doc', 'docx'].indexOf(ext) >= 0) return '📘';
+    if (['xls', 'xlsx', 'csv'].indexOf(ext) >= 0) return '📗';
+    if (['ppt', 'pptx'].indexOf(ext) >= 0) return '📙';
+    if (['zip', 'rar', '7z', 'tar', 'gz'].indexOf(ext) >= 0) return '🗜';
+    if (['mp4', 'mov', 'mkv', 'avi'].indexOf(ext) >= 0) return '🎬';
+    return '📄';
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function setBusy(on) {
+    busy = on;
+    [el.pick, el.photo, el.camera].forEach(function (b) {
+      if (on) b.setAttribute('disabled', 'disabled');
+      else b.removeAttribute('disabled');
+    });
+  }
+
+  function renderQueue(files) {
+    el.queue.classList.remove('hidden');
+    el.done.classList.add('hidden');
+    el.qCount.textContent = '待发送 ' + files.length + ' 个';
+    el.qSent.textContent = sentTotal ? '已发 ' + sentTotal + ' 个' : '';
+    el.qList.innerHTML = files.map(function (f, i) {
+      return '<div class="row" id="row-' + i + '">' +
+        '<span class="fi">' + iconFor(f) + '</span>' +
+        '<div class="fmain">' +
+          '<div class="fname">' + escapeHtml(f.name) + '</div>' +
+          '<div class="fmeta">' + humanSize(f.size) + '</div>' +
+        '</div>' +
+        '<span class="fstate" id="st-' + i + '">等待</span>' +
+      '</div>';
+    }).join('');
+  }
+
+  function setRow(i, state, isErr) {
+    var st = document.getElementById('st-' + i);
+    var row = document.getElementById('row-' + i);
+    if (!st) return;
+    st.textContent = state;
+    if (isErr && row) row.classList.add('err');
+  }
+
+  /* 逐个文件上传，而不是一个大 FormData 全塞进去。
+     原因：手机上一个 200MB 的视频 + 十几张照片一起传，中途断了就全部白传；
+     逐个传的话前面的已经落地，而且进度条能反映「第几个、第几成」。
+     并发 1 是有意的：手机 WiFi 上行本来就窄，多路并发只会互相拖慢。 */
+  function uploadOne(file) {
+    return new Promise(function (resolve) {
+      var form = new FormData();
+      form.append('file', file, file.name);
+
+      var xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/drop-upload?ticket=' + encodeURIComponent(TICKET));
+      xhr.timeout = 30 * 60 * 1000;
+
+      xhr.upload.onprogress = function (e) {
+        if (!e.lengthComputable) return;
+        var pct = Math.round((e.loaded / e.total) * 100);
+        el.barFill.style.width = pct + '%';
+        el.barTxt.textContent = '正在传 ' + file.name + ' · ' + pct + '%';
+      };
+
+      xhr.onload = function () {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          var res = null;
+          try { res = JSON.parse(xhr.responseText); } catch (_) {}
+          var n = res && res.files ? res.files.length : 1;
+          sentTotal += n;
+          if (res && typeof res.sent === 'number') sentTotal = res.sent;
+          resolve({ ok: true });
+          return;
+        }
+        var msg = '上传失败';
+        try { msg = JSON.parse(xhr.responseText).error || msg; } catch (_) {}
+        if (xhr.status === 410) {
+          // 票据失效是终止性的，后面也不用再试了
+          resolve({ ok: false, fatal: true, msg: msg });
+          return;
+        }
+        resolve({ ok: false, msg: msg });
+      };
+
+      xhr.onerror = function () {
+        resolve({ ok: false, msg: '网络断了，检查是否还连着同一个 WiFi' });
+      };
+      xhr.ontimeout = function () {
+        resolve({ ok: false, msg: '传太久了，已超时' });
+      };
+
+      xhr.send(form);
+    });
+  }
+
+  async function handleFiles(fileList) {
+    if (busy) return;
+    var files = Array.prototype.slice.call(fileList || []);
+    if (!files.length) return;
+
+    var room = MAX_FILES - sentTotal;
+    if (room <= 0) {
+      toast('这张码已经收满 ' + MAX_FILES + ' 个文件了，让电脑重新生成一张');
+      return;
+    }
+    if (files.length > room) {
+      toast('还能收 ' + room + ' 个，先传前 ' + room + ' 个');
+      files = files.slice(0, room);
+    }
+
+    setBusy(true);
+    renderQueue(files);
+    el.done.classList.add('hidden');
+
+    var okCount = 0;
+    var failCount = 0;
+    var fatalMsg = '';
+
+    for (var i = 0; i < files.length; i++) {
+      setRow(i, '上传中…');
+      el.barFill.style.width = '0%';
+      var r = await uploadOne(files[i]);
+      if (r.ok) {
+        okCount++;
+        setRow(i, '已发送', false);
+      } else if (r.fatal) {
+        fatalMsg = r.msg;
+        setRow(i, '已失效', true);
+        // 票据都废了，剩下的不用试了，直接标记跳过
+        for (var j = i + 1; j < files.length; j++) setRow(j, '已跳过', true);
+        break;
+      } else {
+        failCount++;
+        setRow(i, '失败', true);
+      }
+    }
+
+    el.barFill.style.width = '100%';
+    setBusy(false);
+
+    if (fatalMsg) {
+      el.barTxt.textContent = '';
+      toast(fatalMsg);
+      setTimeout(function () { location.reload(); }, 2200);
+      return;
+    }
+
+    if (okCount) {
+      el.done.classList.remove('hidden');
+      el.queue.classList.add('hidden');
+      el.doneTitle.textContent = okCount === 1
+        ? '已发到电脑'
+        : '已发到电脑（' + okCount + ' 个）';
+      el.doneText.textContent = '在「' + el.whereName.textContent + '」文件夹里';
+      // 轻微震动反馈，安卓支持；iOS Safari 不支持，静默忽略
+      if (navigator.vibrate) { try { navigator.vibrate(28); } catch (_) {} }
+    }
+
+    if (failCount) {
+      toast(failCount + ' 个没传成功，可以重新选一次');
+      el.queue.classList.remove('hidden');
+      el.barTxt.textContent = okCount + ' 个成功，' + failCount + ' 个失败';
+    }
+  }
+
+  function bind(input, opts) {
+    input.addEventListener('change', function () {
+      var files = Array.prototype.slice.call(input.files || []);
+      input.value = '';   // 清空，这样连选同一张照片两次也能触发
+      if (files.length) handleFiles(files);
+    });
+  }
+
+  bind(el.inFile);
+  bind(el.inPhoto);
+  bind(el.inCamera);
+
+  el.pick.onclick = function () { if (!busy) el.inFile.click(); };
+  el.photo.onclick = function () { if (!busy) el.inPhoto.click(); };
+  el.camera.onclick = function () { if (!busy) el.inCamera.click(); };
+
+  /* 页面被切走再回来（比如去相册选图）在 iOS 上可能整个 WebView 被回收，
+     回来时是重新加载的，所以每次加载都向服务端确认一次票据还活着。 */
+  function checkTicket() {
+    fetch('/api/drop-info?ticket=' + encodeURIComponent(TICKET), { cache: 'no-store' })
+      .then(function (r) { return r.json().then(function (j) { return { s: r.status, j: j }; }); })
+      .then(function (o) {
+        if (o.s >= 400 || !o.j.ok) {
+          el.ticketState.textContent = '这张码已失效，让电脑重新出码';
+          setBusy(true);
+          return;
+        }
+        if (o.j.room) el.whereName.textContent = o.j.room;
+        sentTotal = o.j.sent || 0;
+        el.ticketState.textContent = sentTotal
+          ? '已收到 ' + sentTotal + ' / ' + (o.j.maxFiles || MAX_FILES) + ' 个文件'
+          : '收件箱已就绪';
+      })
+      .catch(function () {
+        el.ticketState.textContent = '连不上电脑，检查 WiFi';
+      });
+  }
+
+  checkTicket();
+  // 长时间停在这个页面上时，定期确认票据还有效（2 小时会过期）
+  setInterval(checkTicket, 10 * 60 * 1000);
+
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) checkTicket();
+  });
+
+  /* 防止把文件拖到页面上时浏览器直接打开它，把当前页面顶掉 */
+  window.addEventListener('dragover', function (e) { e.preventDefault(); });
+  window.addEventListener('drop', function (e) {
+    e.preventDefault();
+    if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
+      handleFiles(e.dataTransfer.files);
+    }
+  });
+})();
+</script>
+</body>
+</html>

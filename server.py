@@ -25,6 +25,7 @@ import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 from urllib.parse import urlparse, unquote, quote, parse_qs
+from html import escape
 from datetime import datetime
 
 # ---------------- 目录 ----------------
@@ -79,6 +80,9 @@ HOST = '0.0.0.0'
 MAX_UPLOAD = 500 * 1024 * 1024  # 单次上传上限 500MB
 COOKIE_NAME = 'lanshare_session'
 
+# 手机投放的文件落到这个子目录，不跟电脑自己的文件混在一起。
+DROP_INBOX_NAME = '手机收件箱'
+
 # ---------------- 抗压参数 ----------------
 # 这些是防止「一个人就能把服务打死」的硬限制，不是性能调优参数。
 MAX_JSON_BODY = 2 * 1024 * 1024   # 普通 JSON 接口的请求体上限
@@ -125,6 +129,11 @@ if _SHARED_IS_NEW:
                 '  1. 对方和这台电脑连同一个 WiFi\n'
                 '  2. 电脑页面上点「手机扫码」，手机扫一下就直接进（不用输地址、不用输 PIN）\n'
                 '  3. 或者手动打开控制台里显示的「手机访问」地址，再输入那 6 位 PIN\n'
+                '\n'
+                '手机想主动发文件给电脑：\n'
+                '  电脑上点「📥 收件箱」，手机扫一下那张码，选好文件就自动传过来，\n'
+                '  不用输地址、不用输 PIN，一次能传多个。文件都落在「' + DROP_INBOX_NAME + '」文件夹里。\n'
+                '  （「手机扫码」是手机来取电脑里的文件，「收件箱」是手机往电脑里送文件，别搞反）\n'
                 '\n'
                 '手机上能做什么：\n'
                 '  上传（一次可选多个）、下载、预览图片和音视频、在线编辑文字、新建文件夹、打包成 zip\n'
@@ -330,6 +339,57 @@ def qr_consume(ticket):
     return exp is not None and exp >= now
 
 
+# ---------------- 投放票据（手机 → 电脑） ----------------
+# 扫码登录的票据是「一次性 + 换登录态」，手机上投文件没法用：
+# 手机浏览器点「选择文件」时页面会切走，回来时 Cookie 可能已经过期，
+# 而且一次扫码要传多个文件，票据不能传一个就废。
+# 所以这里单独一套：**可重复使用**、**不能换登录态**、**只能写不能读**。
+# 拿到投放票据的人只能往 shared/ 里丢文件，看不到里面已有的任何东西。
+DROP_TTL = 2 * 60 * 60    # 2 小时，够开一场会议传完东西
+DROP_MAX_FILES = 200      # 一张票据累计最多接收多少个文件
+_DROP_TICKETS = {}        # ticket -> {'exp': 时间戳, 'n': 已收文件数}
+_DROP_LOCK = threading.Lock()
+
+
+def drop_issue():
+    """生成一张投放票据。返回 (ticket, ttl)。"""
+    now = time.time()
+    with _DROP_LOCK:
+        for key in [k for k, v in _DROP_TICKETS.items() if v['exp'] < now]:
+            _DROP_TICKETS.pop(key, None)
+        ticket = secrets.token_urlsafe(18)
+        _DROP_TICKETS[ticket] = {'exp': now + DROP_TTL, 'n': 0}
+    return ticket, DROP_TTL
+
+
+def drop_check(ticket):
+    """校验投放票据：有效返回 True。票据本身不消耗，能反复用。"""
+    if not ticket:
+        return False
+    now = time.time()
+    with _DROP_LOCK:
+        info = _DROP_TICKETS.get(ticket)
+        if not info:
+            return False
+        if info['exp'] < now:
+            _DROP_TICKETS.pop(ticket, None)
+            return False
+        if info['n'] >= DROP_MAX_FILES:
+            return False
+        return True
+
+
+def drop_count(ticket, delta=0):
+    """读/加票据的已收文件数。delta=0 只读，>0 累加。"""
+    with _DROP_LOCK:
+        info = _DROP_TICKETS.get(ticket)
+        if info is None:
+            return 0
+        if delta > 0:
+            info['n'] += delta
+        return info['n']
+
+
 def _b64e(raw):
     return base64.urlsafe_b64encode(raw).decode().rstrip('=')
 
@@ -485,6 +545,34 @@ QR_FAIL_HTML = """<!DOCTYPE html>
   <h1>这个二维码已经过期了</h1>
   <p>二维码只能用一次，10 分钟内有效。<br>请在电脑上重新点「手机扫码」，再用手机扫新的那张。</p>
   <a href="/">去输入 PIN 登录</a>
+</div></body></html>"""
+
+# 投放票据过期 / 用完时的提示页。跟扫码失败页分开写，因为动作完全不同：
+# 那边要「重新扫码登录」，这边要「让电脑重新出码」。
+DROP_FAIL_HTML = """<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0f1420">
+<title>收件箱已关闭</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
+       background:#0f1420;color:#e6ecf5;padding:24px;
+       font:16px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+  .box{max-width:420px;width:100%;background:#161d2e;border:1px solid #2a3448;
+       border-radius:16px;padding:28px 24px;text-align:center}
+  .ico{font-size:40px;line-height:1;margin-bottom:14px}
+  h1{font-size:19px;margin:0 0 10px}
+  p{color:#8b9bb4;font-size:14px;margin:0 0 8px}
+  .tip{margin-top:16px;padding:12px 14px;border-radius:10px;
+       background:#1b2334;border:1px solid #2a3448;color:#9fb0c8;font-size:13px;text-align:left}
+</style></head>
+<body><div class="box">
+  <div class="ico">📪</div>
+  <h1>电脑那边的收件箱关了</h1>
+  <p>这张码有效期 2 小时，或者已经收满 200 个文件。</p>
+  <p>让电脑上重新点一次「收件箱」，用手机扫新出来的那张码就行。</p>
+  <div class="tip">你刚才选的文件没有传出去，重新扫码后需要再选一次。</div>
 </div></body></html>"""
 
 # 不同系统自带的 mime 表差异很大，Linux 上常认不出 HEIC / m4a。
@@ -809,6 +897,16 @@ class Handler(BaseHTTPRequestHandler):
             return True
         if path.startswith('/q/'):
             return True
+        # /d/<票据> 是「手机投文件」入口。走票据鉴权，不要求登录态：
+        # 手机扫完就该能直接发，不该再让用户输 PIN。
+        # 票据只能往 shared/ 里写，读不到任何已有内容，权限比登录态小得多。
+        if path.startswith('/d/'):
+            return True
+        if path == '/api/drop-upload':
+            return True
+        # drop-info 只回「已收几个 / 上限多少」，不含任何文件信息，放行无害
+        if path == '/api/drop-info':
+            return True
         if path.startswith('/api/'):
             self._json(401, {'error': '未登录或登录已过期', 'needLogin': True})
         else:
@@ -840,10 +938,16 @@ class Handler(BaseHTTPRequestHandler):
 
         if path.startswith('/q/'):
             return self.handle_qr_login(path[len('/q/'):])
+        if path.startswith('/d/'):
+            return self.handle_drop_page(path[len('/d/'):])
         if path == '/api/info':
             return self.api_info()
         if path == '/api/qr-ticket':
             return self.api_qr_ticket()
+        if path == '/api/drop-ticket':
+            return self.api_drop_ticket()
+        if path == '/api/drop-info':
+            return self.api_drop_info(query)
         if path == '/api/auth-status':
             return self.api_auth_status()
         if path in ('/api/files', '/api/list'):
@@ -868,6 +972,9 @@ class Handler(BaseHTTPRequestHandler):
             return self.api_login()
         if path == '/api/logout':
             return self.api_logout()
+        # 手机投放：靠 URL 里的票据鉴权，不走登录态
+        if path == '/api/drop-upload':
+            return self.api_drop_upload()
 
         if not self.check_auth(path):
             return
@@ -976,6 +1083,152 @@ class Handler(BaseHTTPRequestHandler):
                          f'{COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0')
         self.send_header('Cache-Control', 'no-store')
         self.end_headers()
+
+    # ---------- 手机投放（手机 → 电脑） ----------
+    def api_drop_ticket(self):
+        """电脑端生成一张投放票据，用来画二维码。只有已登录的人能调。"""
+        ticket, ttl = drop_issue()
+        self._json(200, {'ticket': ticket, 'ttl': ttl,
+                         'maxFiles': DROP_MAX_FILES})
+
+    def api_drop_info(self, query):
+        """手机端打开投放页时查票据是否还有效，顺便拿到目标目录名。"""
+        ticket = (query.get('ticket') or [''])[0]
+        if not drop_check(ticket):
+            return self._json(410, {'ok': False, 'error': '这张码已过期或已用完'})
+        self._json(200, {
+            'ok': True,
+            'sent': drop_count(ticket),
+            'maxFiles': DROP_MAX_FILES,
+            # 手机上要告诉用户「存到哪儿」，这里是子目录名而不是共享根目录名
+            'room': DROP_INBOX_NAME,
+        })
+
+    def handle_drop_page(self, ticket):
+        """手机扫「收件箱」二维码后打开的页面。
+
+        页面本身是静态的（public/drop.html），票据通过查询参数带过去。
+        不在服务端拼 HTML：拼字符串要处理转义，静态文件更省事也更安全。
+        """
+        ticket = unquote(ticket).strip()
+        if not drop_check(ticket):
+            return self._send(410, DROP_FAIL_HTML, 'text/html; charset=utf-8')
+        try:
+            fs_path = safe_join(PUBLIC_DIR, 'drop.html')
+        except PermissionError:
+            return self._err(403, '禁止访问')
+        if not os.path.isfile(fs_path):
+            return self._err(404, '投放页缺失')
+        # 直接把票据塞进页面，省掉一次 JS 往返（弱网下这就是几百毫秒）
+        with open(fs_path, 'r', encoding='utf-8') as f:
+            html = f.read()
+        html = html.replace('{{DROP_TICKET}}', escape(ticket, quote=True))
+        return self._send(200, html, 'text/html; charset=utf-8')
+
+    def api_drop_upload(self):
+        """手机往这里传文件。只写，不读、不列目录、不删。
+
+        票据放查询参数而不是 Cookie：iOS 对第三方 Cookie 越来越严，
+        同一个页面里带 Cookie 的跨站请求会被拦，参数最稳。
+        """
+        query = parse_qs(urlparse(self.path).query)
+        ticket = (query.get('ticket') or [''])[0]
+        if not drop_check(ticket):
+            self.close_connection = True
+            return self._json(410, {'error': '这张码已过期或已用完，请让电脑重新生成'})
+
+        if READ_ONLY:
+            self.close_connection = True
+            return self._json(403, {'error': '这台电脑开了只读模式，暂时不能收文件'})
+
+        ctype = self.headers.get('Content-Type', '')
+        if not ctype.startswith('multipart/form-data'):
+            self.close_connection = True
+            return self._err(400, '请使用表单上传')
+        try:
+            length = int(self.headers.get('Content-Length') or 0)
+        except ValueError:
+            length = 0
+        if length <= 0:
+            self.close_connection = True
+            return self._err(400, '没有收到文件内容')
+        if length > MAX_UPLOAD:
+            self.close_connection = True
+            return self._err(413, '文件过大（上限 500MB）')
+
+        boundary = None
+        for seg in ctype.split(';'):
+            seg = seg.strip()
+            if seg.lower().startswith('boundary='):
+                boundary = seg[len('boundary='):].strip('"')
+                break
+        if not boundary:
+            self.close_connection = True
+            return self._err(400, '上传格式错误')
+
+        if not _UPLOAD_SLOTS.acquire(blocking=False):
+            self.close_connection = True
+            return self._json(503, {'error': '电脑正在收别的文件，稍等一下再试'})
+        try:
+            try:
+                body = self._read_body(length, MAX_UPLOAD, timeout=BODY_TIMEOUT * 6)
+            except ValueError as e:
+                self.close_connection = True
+                if str(e) == 'too large':
+                    return self._err(413, '文件过大（上限 500MB）')
+                return self._err(408, '上传超时，请重试')
+
+            saved, skipped = [], []
+            # 手机投放统一落到「手机收件箱」子目录，不跟电脑自己的文件混在一起，
+            # 电脑端一眼能看出哪些是手机刚传过来的。
+            inbox = os.path.join(SHARED_DIR, DROP_INBOX_NAME)
+            try:
+                os.makedirs(inbox, exist_ok=True)
+            except OSError as e:
+                return self._err(500, f'创建收件箱失败：{e.strerror or e}')
+
+            for filename, data in parse_multipart(body, boundary.encode('utf-8', 'replace')):
+                if not filename:
+                    continue
+                if any(ch in filename for ch in _BAD_NAME_CHARS):
+                    skipped.append(f'{filename}: 文件名包含非法字符 <>:"/\\|?*')
+                    continue
+                filename = os.path.basename(filename.replace('\\', '/')).strip()
+                ok, why = check_filename(filename)
+                if not ok:
+                    skipped.append(f'{filename or "(空名)"}: {why}')
+                    continue
+                try:
+                    target = safe_join(inbox, filename)
+                except PermissionError:
+                    skipped.append(f'{filename}: 路径越界')
+                    continue
+                base, ext = os.path.splitext(target)
+                idx = 1
+                while os.path.exists(target):
+                    target = f'{base} ({idx}){ext}'
+                    idx += 1
+                try:
+                    with open(target, 'wb') as out:
+                        out.write(data)
+                except OSError as e:
+                    skipped.append(f'{filename}: {e.strerror or e}')
+                    continue
+                saved.append({'name': os.path.basename(target),
+                              'size': len(data),
+                              'sizeText': human_size(len(data))})
+
+            if not saved:
+                msg = '没有收到有效文件'
+                if skipped:
+                    msg += '（' + '；'.join(skipped[:3]) + '）'
+                return self._err(400, msg)
+
+            total = drop_count(ticket, len(saved))
+            return self._json(200, {'ok': True, 'files': saved, 'skipped': skipped,
+                                    'sent': total, 'maxFiles': DROP_MAX_FILES})
+        finally:
+            _UPLOAD_SLOTS.release()
 
     # ---------- 静态资源 ----------
     def serve_static(self, path):
@@ -1486,6 +1739,7 @@ def main():
         print(f'  程序所在位置不可写，数据改存在：{DATA_DIR}')
     if lan_url:
         print('  手机连同一个 WiFi，扫电脑页面上的二维码即可进入，不用输地址。')
+    print('  想反过来让手机把文件送给电脑：页面上点「📥 收件箱」，手机扫那张码。')
     print('  关闭这个窗口 = 停止服务')
     if scheme == 'http':
         print('  注意：当前是 HTTP 明文传输，公网部署请启用 HTTPS（见 README）。')

@@ -147,6 +147,8 @@
     $('#btnCopy').onclick = copyAddress;
     const qrBtn = $('#btnQr');
     if (qrBtn) qrBtn.onclick = showQrDialog;
+    const dropBtn = $('#btnDrop');
+    if (dropBtn) dropBtn.onclick = showDropDialog;
     $('#btnRefresh').onclick = () => load(state.path);
     const logoutBtn = $('#btnLogout');
     if (logoutBtn) logoutBtn.onclick = logout;
@@ -300,6 +302,91 @@
     location.replace('/login.html');
   }
 
+  /* ---------------- 收件箱：手机往电脑投文件 ---------------- */
+  /* 扫码登录那张票是一次性的、换登录态的，投文件用不了：
+     手机点「选择文件」时页面会被系统切走，回来可能已换会话；
+     而且要传多个文件，票据不能传一个就废。
+     所以走 /api/drop-ticket 那套：可复用、只写不读、2 小时有效。 */
+  let dropTimer = null;
+
+  function stopDropPoll() {
+    if (dropTimer) { clearInterval(dropTimer); dropTimer = null; }
+  }
+
+  async function showDropDialog() {
+    let data;
+    try {
+      data = await api('/api/drop-ticket');
+    } catch (e) {
+      return toast('生成失败：' + e.message, 'err');
+    }
+
+    const ips = (state.info && state.info.lanIps) || [];
+    const port = (state.info && state.info.port) || location.port;
+    const ip = ips[0];
+    if (!ip) return toast('没检测到局域网地址，请检查网络连接', 'err');
+
+    const url = 'http://' + ip + ':' + port + '/d/' + data.ticket;
+
+    let svg = '';
+    try {
+      const qr = qrcode(0, 'M');
+      qr.addData(url);
+      qr.make();
+      svg = qr.createSvgTag({ cellSize: 6, margin: 3, scalable: true });
+    } catch (e) {
+      return toast('二维码绘制失败', 'err');
+    }
+
+    openModal('收件箱',
+      '<div class="qr-wrap">' +
+        '<div class="qr-img">' + svg + '</div>' +
+        '<p class="qr-tip">用手机扫这张码，选文件就自动传过来</p>' +
+        '<p class="qr-note">手机要和电脑连同一个 WiFi。' +
+          '这张码 <b>2 小时内可以反复用</b>，传多少个都行（上限 ' +
+          data.maxFiles + ' 个）。</p>' +
+        '<div class="drop-live" id="dropLive">' +
+          '<span class="drop-dot"></span>' +
+          '<span id="dropLiveText">正在等手机发送…</span>' +
+        '</div>' +
+        '<p class="qr-url"><code>' + escapeHtml(url) + '</code></p>' +
+        '<p class="qr-note" style="margin-top:12px">' +
+          '想让电脑给别人发文件，用上面的「手机扫码」；<br>' +
+          '想让手机给你发文件，就用这张码。</p>' +
+      '</div>',
+      [
+        { text: '在电脑上打开', kind: 'ghost', onClick: () => window.open(url, '_blank') },
+        { text: '完成', kind: 'primary', onClick: closeModal },
+      ]);
+
+    // 轮询「已收几个」，让用户不用回头翻文件夹就知道传过来了
+    let lastSeen = -1;
+    const tick = async () => {
+      if (!el.modal.classList.contains('show')) return stopDropPoll();
+      try {
+        const res = await fetch('/api/drop-info?ticket=' + encodeURIComponent(data.ticket),
+                               { cache: 'no-store' });
+        if (!res.ok) { stopDropPoll(); return; }
+        const info = await res.json();
+        const box = $('#dropLiveText');
+        if (!box) return;
+        const sent = info.sent || 0;
+        if (sent > lastSeen && lastSeen >= 0) {
+          box.innerHTML = '已收到 <b>' + sent + '</b> 个文件，正在刷新列表…';
+          load(state.path);
+        } else {
+          box.innerHTML = sent
+            ? '已收到 <b>' + sent + '</b> 个文件，继续扫着传就行'
+            : '正在等手机发送…';
+        }
+        lastSeen = sent;
+      } catch (_) { /* 掉线了就下一轮再试，不打断用户 */ }
+    };
+    stopDropPoll();
+    dropTimer = setInterval(tick, 2000);
+    tick();
+  }
+
   /* ---------------- 加载与渲染 ---------------- */
   async function load(path) {
     try {
@@ -443,7 +530,10 @@
     a.href = item.isDirectory
       ? '/api/zip/' + encodePath(item.path)
       : '/api/download/' + encodePath(item.path);
-    a.download = item.name;
+    // 文件夹是打包成 zip 下载的，名字必须带 .zip 后缀：
+    // 服务端的 Content-Disposition 虽然写了 .zip，但 iOS Safari 会无视 <a download>
+    // 和跨源分发头，最终用的是这里给的名字 —— 不带后缀就成了无类型文件，存不下来。
+    a.download = item.isDirectory ? item.name + '.zip' : item.name;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -530,7 +620,11 @@
     el.modal.classList.add('show');
   }
 
-  function closeModal() { el.modal.classList.remove('show'); }
+  function closeModal() {
+    el.modal.classList.remove('show');
+    // 弹窗一关就停掉收件箱的轮询，不然页面在后台一直打请求
+    if (typeof stopDropPoll === 'function') stopDropPoll();
+  }
 
   function confirmDialog(title, message) {
     return new Promise((resolve) => {

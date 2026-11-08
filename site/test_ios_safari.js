@@ -143,7 +143,13 @@ function check(name, ok, detail) {
   const beforePages = context.pages().length;
   context.on('page', () => { newPageOpened = true; });
 
-  const dlBtn = await page.$('.item [data-act="download"]');
+  /* 必须挑一个**文件**行来点下载。早先这里直接取第一个 [data-act="download"]，
+     而列表按「文件夹优先」排序，一旦 shared/ 里有子目录（比如投放用的「手机收件箱」）
+     就会点到目录的「打包下载」，拿到的文件名当然没有扩展名 —— 那不是回归，是选错了行。
+     用 data-dir="false" 精确落到文件行；一个文件都没有时退回任意行，保持测试不空跑。 */
+  const dlBtn = await page.$('.item[data-dir="false"] [data-act="download"]')
+    || await page.$('.item [data-act="download"]');
+  const dlRowIsDir = dlBtn ? await dlBtn.evaluate((el) => el.closest('.item').dataset.dir === 'true') : null;
   if (dlBtn) {
     try {
       const [dl] = await Promise.all([
@@ -155,11 +161,14 @@ function check(name, ok, detail) {
   }
   check('点「下载」触发下载事件（iOS 上 download 属性常被无视）',
     !!downloadEvent || !dlBtn,
-    downloadEvent ? 'filename=' + downloadEvent.suggestedFilename()
+    downloadEvent ? 'filename=' + downloadEvent.suggestedFilename() + (dlRowIsDir ? '（点在目录行）' : '（点在文件行）')
       : (dlBtn ? '8 秒内没有 download 事件，且打开了新页=' + newPageOpened : '列表里没有文件，跳过'));
   if (downloadEvent) {
     const fn = downloadEvent.suggestedFilename();
-    check('下载文件名带正确扩展名', /\.[a-z0-9]{1,10}$/i.test(fn), 'filename=' + fn);
+    // 目录走打包下载，后缀必须是 .zip；文件则要保留原后缀
+    const okExt = dlRowIsDir ? /\.zip$/i.test(fn) : /\.[a-z0-9]{1,10}$/i.test(fn);
+    check('下载文件名带正确扩展名', okExt,
+      'filename=' + fn + (dlRowIsDir ? '（目录应 .zip）' : ''));
   }
 
   /* ---------- 10. 图片/PDF 预览：window.open 是否被拦截 ---------- */

@@ -263,3 +263,42 @@ textarea:focus { border-color: var(--primary); }
 @media (pointer: coarse) {
   #btnQr { display: none; }
 }
+
+/* ---------------- 收件箱弹窗 ---------------- */
+/* 这个状态条的意义是：用户扫完码开始传，眼睛在手机和电脑之间来回看，
+   电脑这边必须有个会动的东西，否则不知道到底有没有在收。 */
+.drop-live {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: rgba(40, 120, 90, .14);
+  border: 1px solid rgba(90, 200, 150, .26);
+  color: #a8d8bf;
+  font-size: 13px;
+}
+
+.drop-live b { color: #7bf0b6; font-weight: 600; }
+
+/* 呼吸点：纯 CSS 动画，不依赖 JS 计时器，标签页被挂起也不会错位 */
+.drop-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #3fc98c;
+  animation: dropPulse 1.4s ease-in-out infinite;
+}
+
+@keyframes dropPulse {
+  0%, 100% { opacity: .35; transform: scale(.8); }
+  50%      { opacity: 1;   transform: scale(1.15); }
+}
+
+/* 系统里开了「减少动态效果」就关掉动画，这是无障碍的硬要求 */
+@media (prefers-reduced-motion: reduce) {
+  .drop-dot { animation: none; opacity: 1; }
+}
